@@ -40,6 +40,21 @@ function uid(){ return Date.now().toString(36) + Math.random().toString(36).slic
 
 let EVENTS = loadEvents();
 
+const COMPACT_KEY = 'horizon_compact_v1';
+function loadCompact(){ return localStorage.getItem(COMPACT_KEY) === '1'; }
+function saveCompact(v){ localStorage.setItem(COMPACT_KEY, v ? '1' : '0'); }
+let compactMode = loadCompact();
+
+function knownNames(){
+  const tally = {};
+  EVENTS.forEach(ev => (ev.goingWith||[]).forEach(n=>{
+    const key = n.trim();
+    if(!key) return;
+    tally[key] = (tally[key]||0) + 1;
+  }));
+  return Object.keys(tally).sort((a,b)=> tally[b]-tally[a] || a.localeCompare(b));
+}
+
 /* ---------------- date helpers ---------------- */
 function toDateStr(d){
   const y=d.getFullYear(), m=String(d.getMonth()+1).padStart(2,'0'), day=String(d.getDate()).padStart(2,'0');
@@ -212,6 +227,8 @@ const ICONS = {
   trash: '<svg viewBox="0 0 24 24"><path d="M4 7h16M9 7V5a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2m-9 0 1 13a1 1 0 0 0 1 1h8a1 1 0 0 0 1-1l1-13"/></svg>',
   edit: '<svg viewBox="0 0 24 24"><path d="M4 20h4l10.5-10.5a2 2 0 0 0 0-2.8l-1.2-1.2a2 2 0 0 0-2.8 0L4 16v4Z"/></svg>',
   plus: '<svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>',
+  rows: '<svg viewBox="0 0 24 24"><rect x="4" y="5" width="16" height="4.5" rx="1.3"/><rect x="4" y="14.5" width="16" height="4.5" rx="1.3"/></svg>',
+  squares: '<svg viewBox="0 0 24 24"><rect x="4" y="4" width="7" height="7" rx="1.3"/><rect x="13" y="4" width="7" height="7" rx="1.3"/><rect x="4" y="13" width="7" height="7" rx="1.3"/><rect x="13" y="13" width="7" height="7" rx="1.3"/></svg>',
 };
 function icon(name){ return ICONS[name] || ''; }
 
@@ -230,11 +247,18 @@ function renderHome(){
 
   const head = document.createElement('div');
   head.className = 'page-head';
+  head.style.alignItems = 'center';
   head.innerHTML = `
-    <div>
-      <div class="wordmark">HORIZON</div>
-      <div class="page-sub">${upcoming.length ? `${upcoming.length} thing${upcoming.length===1?'':'s'} coming up` : 'Nothing on the horizon'}</div>
-    </div>`;
+    <div class="page-sub" style="font-size:15px;font-weight:600;color:var(--text);">${upcoming.length ? `${upcoming.length} thing${upcoming.length===1?'':'s'} coming up` : 'Nothing on the horizon'}</div>
+  `;
+  if(upcoming.length){
+    const toggle = document.createElement('button');
+    toggle.className = 'icon-btn';
+    toggle.setAttribute('aria-label', compactMode ? 'Switch to card view' : 'Switch to compact view');
+    toggle.innerHTML = compactMode ? icon('squares') : icon('rows');
+    toggle.onclick = ()=>{ compactMode = !compactMode; saveCompact(compactMode); render(); };
+    head.appendChild(toggle);
+  }
   wrap.appendChild(head);
 
   if(!upcoming.length){
@@ -248,9 +272,46 @@ function renderHome(){
 
   const list = document.createElement('div');
   list.className = 'ticket-list';
-  upcoming.forEach(ev => list.appendChild(ticketCard(ev)));
+  upcoming.forEach(ev => list.appendChild(compactMode ? ticketCompactRow(ev) : ticketCard(ev)));
   wrap.appendChild(list);
   return wrap;
+}
+
+function ticketCompactRow(ev){
+  const row = document.createElement('div');
+  row.className = 'ticket-compact';
+  row.onclick = ()=> navigate('/event/' + ev.id);
+  const cd = getCountdown(ev);
+  const metaParts = [formatDateShort(ev.startDate) + (ev.time?` · ${ev.time}`:'')];
+  if(ev.location) metaParts.push(ev.location);
+
+  const main = document.createElement('div');
+  main.className = 'tc-main';
+  main.innerHTML = `
+    <div class="tc-info">
+      <div class="tc-type-row">${TYPE_ICON[ev.type]||''} ${ev.type}</div>
+      <div class="tc-title">${escapeHtml(ev.title)}</div>
+      <div class="tc-meta">${metaParts.map(escapeHtml).join(' · ')}</div>
+    </div>
+  `;
+  row.appendChild(main);
+
+  const perf = document.createElement('div');
+  perf.className = 'tc-perf';
+  row.appendChild(perf);
+
+  const foot = document.createElement('div');
+  foot.className = 'tc-foot';
+  foot.innerHTML = `
+    <div class="tc-cd ${cd.urgent?'is-urgent':''}">
+      ${cd.kind==='days'
+        ? `<span class="tc-cd-num">${cd.value}</span><span class="tc-cd-unit">DAY${cd.value===1?'':'S'}</span>`
+        : `<span class="tc-cd-word">${cd.word}</span>`}
+    </div>
+    ${ev.ticketPurchased ? `<span class="pill pill-success pill-sm">${icon('ticket')}</span>` : ''}
+  `;
+  row.appendChild(foot);
+  return row;
 }
 
 function emptyState(title, sub, cta, onClick){
@@ -438,10 +499,11 @@ function renderForm(existing, liveDraft, liveMultiDay, livePresetsTouched, liveI
     }
     box.appendChild(row);
 
-    const md = document.createElement('label');
-    md.style.cssText='display:flex;align-items:center;gap:8px;margin-top:12px;font-size:13.5px;color:var(--text-muted);cursor:pointer;';
-    md.innerHTML = `<input type="checkbox" ${multiDay?'checked':''} style="width:16px;height:16px;accent-color:var(--accent);"> Multi-day event`;
-    md.querySelector('input').onchange = (e)=>{ multiDay = e.target.checked; if(!multiDay) draft.endDate=null; else draft.endDate = draft.endDate || draft.startDate; renderInto(); };
+    const md = document.createElement('button');
+    md.type = 'button';
+    md.className = 'multiday-toggle' + (multiDay ? ' is-on' : '');
+    md.innerHTML = `<span class="md-box">${icon('check')}</span> Multi-day event`;
+    md.onclick = ()=>{ multiDay = !multiDay; if(!multiDay) draft.endDate=null; else draft.endDate = draft.endDate || draft.startDate; renderInto(); };
     box.appendChild(md);
     return box;
   }));
@@ -468,16 +530,31 @@ function renderForm(existing, liveDraft, liveMultiDay, livePresetsTouched, liveI
     const row = document.createElement('div'); row.className='add-item-row';
     const i = document.createElement('input'); i.className='input'; i.placeholder='Add a name and press enter';
     const addBtn = document.createElement('button'); addBtn.className='btn btn-ghost btn-sm'; addBtn.textContent='Add';
-    const addName = ()=>{
-      const v = i.value.trim();
+    const addName = (val)=>{
+      const v = (val!==undefined ? val : i.value).trim();
       if(!v) return;
       draft.goingWith.push(v); i.value='';
       renderInto();
     };
     i.onkeydown = (e)=>{ if(e.key==='Enter'){ e.preventDefault(); addName(); } };
-    addBtn.onclick = addName;
+    addBtn.onclick = ()=> addName();
     row.appendChild(i); row.appendChild(addBtn);
     box.appendChild(row);
+
+    const already = draft.goingWith.map(n=>n.toLowerCase());
+    const suggestions = knownNames().filter(n => !already.includes(n.toLowerCase())).slice(0, 8);
+    if(suggestions.length){
+      const label = document.createElement('div'); label.className='suggest-label'; label.textContent = 'Suggestions';
+      box.appendChild(label);
+      const sRow = document.createElement('div'); sRow.className='suggest-row';
+      suggestions.forEach(name=>{
+        const c = document.createElement('button'); c.type='button'; c.className='suggest-chip';
+        c.innerHTML = `${icon('plus')} ${escapeHtml(name)}`;
+        c.onclick = ()=> addName(name);
+        sRow.appendChild(c);
+      });
+      box.appendChild(sRow);
+    }
 
     if(draft.goingWith.length){
       const tags = document.createElement('div'); tags.className='name-tags';
@@ -642,128 +719,29 @@ function renderDetail(id){
     return wrap;
   }
 
-  const backRow = document.createElement('div');
-  backRow.className = 'back-row';
-  backRow.style.justifyContent = 'space-between';
-  backRow.innerHTML = `
-    <div style="display:flex;align-items:center;gap:14px;">
-      <button class="back-btn">${icon('chevronLeft')}</button>
-    </div>
-    <div style="display:flex;gap:8px;">
-      <button class="icon-btn" id="editBtn">${icon('edit')}</button>
-    </div>
-  `;
-  backRow.querySelector('.back-btn').onclick = ()=> navigate(ev.completed ? '/archive' : '/home');
-  wrap.appendChild(backRow);
-  backRow.querySelector('#editBtn').onclick = ()=> navigate('/edit/'+ev.id);
-
-  const hero = document.createElement('div'); hero.className='detail-hero';
-  hero.innerHTML = `
-    <div class="detail-type">${TYPE_ICON[ev.type]||''} ${ev.type}</div>
-    <div class="detail-title">${escapeHtml(ev.title)}</div>
-    <div class="detail-meta">
-      <div class="detail-meta-row">${icon('calendar')} ${formatEventDate(ev)}${ev.time?` · ${ev.time}`:''}</div>
-      ${ev.location?`<div class="detail-meta-row">${icon('pin')} ${escapeHtml(ev.location)}</div>`:''}
+  // -- Icon action row (back / edit / complete / delete) --
+  const actions = document.createElement('div');
+  actions.className = 'detail-actions';
+  actions.innerHTML = `
+    <button class="icon-btn" id="backBtn">${icon('chevronLeft')}</button>
+    <div class="detail-actions-right">
+      <button class="icon-btn icon-btn-sm" id="editBtn" aria-label="Edit">${icon('edit')}</button>
+      <button class="icon-btn icon-btn-sm ${ev.completed?'':'icon-btn-accent'}" id="completeBtn" aria-label="${ev.completed?'Move back to upcoming':'Mark as completed'}">${icon('check')}</button>
+      <button class="icon-btn icon-btn-sm icon-btn-danger" id="deleteBtn" aria-label="Delete">${icon('trash')}</button>
     </div>
   `;
-  wrap.appendChild(hero);
-
-  if(!ev.completed){
-    const cd = getCountdown(ev);
-    const cdBox = document.createElement('div');
-    cdBox.className = 'countdown-hero' + (cd.urgent ? ' is-urgent':'');
-    cdBox.innerHTML = cd.kind==='days'
-      ? `<div class="countdown ${cd.urgent?'is-urgent':''}" style="justify-content:center;"><span class="countdown-num">${cd.value}</span><span class="countdown-unit">DAY${cd.value===1?'':'S'}</span></div>`
-      : `<div class="countdown ${cd.urgent?'is-urgent':''}" style="justify-content:center;"><span class="countdown-word">${cd.word}</span></div>`;
-    wrap.appendChild(cdBox);
-  } else {
-    const doneBox = document.createElement('div');
-    doneBox.className = 'countdown-hero';
-    doneBox.innerHTML = `<div class="countdown-word" style="font-family:var(--font-display);font-size:32px;color:var(--text-muted);">${daysAgoLabel(ev.completedAt||ev.endDate||ev.startDate).toUpperCase()}</div>`;
-    wrap.appendChild(doneBox);
-  }
-
-  if(ev.goingWith && ev.goingWith.length){
-    wrap.appendChild(sectionTitle('Going with'));
-    const tl = document.createElement('div'); tl.className='tag-list';
-    ev.goingWith.forEach(n=>{ const t=document.createElement('span'); t.className='tag'; t.textContent=n; tl.appendChild(t); });
-    wrap.appendChild(tl);
-  }
-
-  wrap.appendChild(sectionTitle('Ticket'));
-  const ticketCardEl = document.createElement('div'); ticketCardEl.className='detail-card';
-  ticketCardEl.style.cssText='display:flex;align-items:center;justify-content:space-between;';
-  ticketCardEl.innerHTML = `
-    <div style="display:flex;align-items:center;gap:10px;">${icon('ticket')} <span>${ev.ticketPurchased?'Ticket purchased':'Not purchased yet'}</span></div>
-  `;
-  const tSwitch = document.createElement('div'); tSwitch.className = 'switch' + (ev.ticketPurchased?' is-on':'');
-  tSwitch.onclick = ()=>{
-    ev.ticketPurchased = !ev.ticketPurchased;
-    tSwitch.classList.toggle('is-on', ev.ticketPurchased);
-    ticketCardEl.querySelector('span').textContent = ev.ticketPurchased ? 'Ticket purchased' : 'Not purchased yet';
-    saveEvents(EVENTS);
-  };
-  ticketCardEl.appendChild(tSwitch);
-  wrap.appendChild(ticketCardEl);
-
-  // Preparation
-  if((ev.travelTo && ev.travelTo.method) || (ev.travelHome && ev.travelHome.method)){
-    wrap.appendChild(sectionTitle('Preparation'));
-    const card = document.createElement('div'); card.className='detail-card';
-    if(ev.travelTo && ev.travelTo.method){
-      card.appendChild(prepRow('Getting there', ev.travelTo));
-    }
-    if(ev.travelHome && ev.travelHome.method){
-      card.appendChild(prepRow('Getting home', ev.travelHome));
-    }
-    wrap.appendChild(card);
-  }
-
-  if(ev.bringItems && ev.bringItems.length){
-    wrap.appendChild(sectionTitle('Things to bring'));
-    wrap.appendChild(checklistView(ev.bringItems, ev));
-  }
-
-  if(ev.prepTasks && ev.prepTasks.length){
-    wrap.appendChild(sectionTitle('Before you go'));
-    wrap.appendChild(checklistView(ev.prepTasks, ev));
-  }
-
-  // Share
-  wrap.appendChild(sectionTitle('Share'));
-  const shareRow = document.createElement('div'); shareRow.className='share-row';
-  const shareEventBtn = document.createElement('button'); shareEventBtn.className='btn btn-ghost'; shareEventBtn.textContent='Share event';
-  shareEventBtn.onclick = ()=> shareEvent(ev, false);
-  const sharePrepBtn = document.createElement('button'); sharePrepBtn.className='btn btn-ghost'; sharePrepBtn.textContent='Share preparation';
-  sharePrepBtn.onclick = ()=> shareEvent(ev, true);
-  shareRow.appendChild(shareEventBtn); shareRow.appendChild(sharePrepBtn);
-  wrap.appendChild(shareRow);
-
-  // Mark complete
-  if(!ev.completed){
-    const completeBtn = document.createElement('button');
-    completeBtn.className = 'btn btn-ghost btn-block'; completeBtn.style.marginTop='18px';
-    completeBtn.textContent = 'Mark as completed';
-    completeBtn.onclick = ()=>{
-      ev.completed = true; ev.completedAt = todayStr();
-      saveEvents(EVENTS); showToast('Moved to Archive'); navigate('/archive');
-    };
-    wrap.appendChild(completeBtn);
-  } else {
-    const undoBtn = document.createElement('button');
-    undoBtn.className = 'btn btn-ghost btn-block'; undoBtn.style.marginTop='18px';
-    undoBtn.textContent = 'Move back to Upcoming';
-    undoBtn.onclick = ()=>{
+  actions.querySelector('#backBtn').onclick = ()=> navigate(ev.completed ? '/archive' : '/home');
+  actions.querySelector('#editBtn').onclick = ()=> navigate('/edit/'+ev.id);
+  actions.querySelector('#completeBtn').onclick = ()=>{
+    if(ev.completed){
       ev.completed = false; ev.completedAt = null;
       saveEvents(EVENTS); showToast('Moved to Upcoming'); navigate('/home');
-    };
-    wrap.appendChild(undoBtn);
-  }
-
-  // Delete
-  const dz = document.createElement('div'); dz.className='danger-zone';
-  const delBtn = document.createElement('button'); delBtn.className='btn btn-danger btn-block'; delBtn.textContent='Delete event';
-  delBtn.onclick = ()=> confirmSheet(
+    } else {
+      ev.completed = true; ev.completedAt = todayStr();
+      saveEvents(EVENTS); showToast('Moved to Archive'); navigate('/archive');
+    }
+  };
+  actions.querySelector('#deleteBtn').onclick = ()=> confirmSheet(
     'Delete this event?',
     'This can\u2019t be undone. All preparation details will be lost.',
     'Delete', ()=>{
@@ -773,45 +751,116 @@ function renderDetail(id){
       navigate('/home');
     }
   );
-  dz.appendChild(delBtn);
-  wrap.appendChild(dz);
+  wrap.appendChild(actions);
 
-  return wrap;
-}
-
-function sectionTitle(t){
-  const el = document.createElement('div'); el.className='section-title'; el.textContent=t;
-  return el;
-}
-
-function prepRow(label, obj){
-  const row = document.createElement('div'); row.className='prep-row';
-  row.innerHTML = `
-    <div class="prep-icon">${icon(TRAVEL_ICON[obj.method]||'dot')}</div>
-    <div>
-      <div class="prep-label">${label} · ${escapeHtml(obj.method)}</div>
-      <div class="prep-detail ${obj.details?'':'is-empty'}">${obj.details ? escapeHtml(obj.details) : 'No details added'}</div>
+  // -- Hero: title/meta on the left, countdown pill on the right --
+  const hero = document.createElement('div'); hero.className='detail-hero';
+  const heroLeft = document.createElement('div');
+  heroLeft.innerHTML = `
+    <div class="detail-type">${TYPE_ICON[ev.type]||''} ${ev.type}</div>
+    <div class="detail-title">${escapeHtml(ev.title)}</div>
+    <div class="detail-meta">
+      <div class="detail-meta-row">${icon('calendar')} ${formatEventDate(ev)}${ev.time?` · ${ev.time}`:''}</div>
+      ${ev.location?`<div class="detail-meta-row">${icon('pin')} ${escapeHtml(ev.location)}</div>`:''}
     </div>
   `;
-  return row;
+  hero.appendChild(heroLeft);
+
+  const cdPill = document.createElement('div');
+  if(!ev.completed){
+    const cd = getCountdown(ev);
+    cdPill.className = 'countdown-pill' + (cd.urgent ? ' is-urgent':'');
+    cdPill.innerHTML = cd.kind==='days'
+      ? `<span class="cp-num">${cd.value}</span><span class="cp-unit">DAY${cd.value===1?'':'S'}</span>`
+      : `<span class="cp-word">${cd.word}</span>`;
+  } else {
+    cdPill.className = 'countdown-pill';
+    cdPill.innerHTML = `<span class="cp-word" style="font-size:13px;color:var(--text-muted);">${daysAgoLabel(ev.completedAt||ev.endDate||ev.startDate)}</span>`;
+  }
+  hero.appendChild(cdPill);
+  wrap.appendChild(hero);
+
+  if(ev.goingWith && ev.goingWith.length){
+    const tl = document.createElement('div'); tl.className='tag-list'; tl.style.marginBottom='4px';
+    ev.goingWith.forEach(n=>{ const t=document.createElement('span'); t.className='tag'; t.textContent=n; tl.appendChild(t); });
+    wrap.appendChild(tl);
+  }
+
+  // -- Ticket + Preparation combined into one compact card --
+  const infoCard = document.createElement('div'); infoCard.className='detail-card'; infoCard.style.marginTop='12px';
+
+  const ticketLine = document.createElement('div');
+  ticketLine.style.cssText = 'display:flex;align-items:center;justify-content:space-between;padding:5px 0;';
+  ticketLine.innerHTML = `<div style="display:flex;align-items:center;gap:8px;font-size:13px;">${icon('ticket')} <span>${ev.ticketPurchased?'Ticket purchased':'Not purchased yet'}</span></div>`;
+  const tSwitch = document.createElement('div'); tSwitch.className = 'switch' + (ev.ticketPurchased?' is-on':'');
+  tSwitch.onclick = (e)=>{
+    e.stopPropagation();
+    ev.ticketPurchased = !ev.ticketPurchased;
+    tSwitch.classList.toggle('is-on', ev.ticketPurchased);
+    ticketLine.querySelector('span').textContent = ev.ticketPurchased ? 'Ticket purchased' : 'Not purchased yet';
+    saveEvents(EVENTS);
+  };
+  ticketLine.appendChild(tSwitch);
+  infoCard.appendChild(ticketLine);
+
+  if(ev.travelTo && ev.travelTo.method){
+    infoCard.appendChild(prepLine('There', ev.travelTo));
+  }
+  if(ev.travelHome && ev.travelHome.method){
+    infoCard.appendChild(prepLine('Home', ev.travelHome));
+  }
+  wrap.appendChild(infoCard);
+
+  // -- Bring / Tasks as compact wrapping chip checklists --
+  if(ev.bringItems && ev.bringItems.length){
+    const sec = document.createElement('div'); sec.className='detail-section';
+    sec.innerHTML = `<div class="section-label">Things to bring</div>`;
+    sec.appendChild(chipChecklist(ev.bringItems));
+    wrap.appendChild(sec);
+  }
+
+  if(ev.prepTasks && ev.prepTasks.length){
+    const sec = document.createElement('div'); sec.className='detail-section';
+    sec.innerHTML = `<div class="section-label">Before you go</div>`;
+    sec.appendChild(chipChecklist(ev.prepTasks));
+    wrap.appendChild(sec);
+  }
+
+  // -- Share (icon-only, one row) --
+  const shareRow = document.createElement('div'); shareRow.className='share-row'; shareRow.style.marginTop='14px';
+  const shareEventBtn = document.createElement('button'); shareEventBtn.className='share-icon-btn';
+  shareEventBtn.innerHTML = `${icon('share')} Share event`;
+  shareEventBtn.onclick = ()=> shareEvent(ev, false);
+  const sharePrepBtn = document.createElement('button'); sharePrepBtn.className='share-icon-btn';
+  sharePrepBtn.innerHTML = `${icon('share')} Share prep`;
+  sharePrepBtn.onclick = ()=> shareEvent(ev, true);
+  shareRow.appendChild(shareEventBtn); shareRow.appendChild(sharePrepBtn);
+  wrap.appendChild(shareRow);
+
+  return wrap;
 }
 
-function checklistView(items, ev){
-  const wrap = document.createElement('div'); wrap.className='detail-card';
-  const list = document.createElement('div'); list.className='checklist';
+function prepLine(label, obj){
+  const line = document.createElement('div');
+  line.className = 'prep-line';
+  line.innerHTML = `${icon(TRAVEL_ICON[obj.method]||'dot')} <b>${label}:</b> ${escapeHtml(obj.method)}${obj.details ? ' — '+escapeHtml(obj.details) : ''}`;
+  return line;
+}
+
+function chipChecklist(items){
+  const row = document.createElement('div'); row.className='chip-check-row';
   items.forEach(it=>{
-    const row = document.createElement('div');
-    row.className = 'check-item' + (it.completed?' is-done':'');
-    row.innerHTML = `<div class="checkbox">${icon('check')}</div><div class="check-label">${escapeHtml(it.text)}</div>`;
-    row.onclick = ()=>{
+    const chip = document.createElement('div');
+    chip.className = 'chip-check' + (it.completed?' is-done':'');
+    chip.innerHTML = `<span class="cc-box">${icon('check')}</span><span>${escapeHtml(it.text)}</span>`;
+    chip.onclick = ()=>{
       it.completed = !it.completed;
-      row.classList.toggle('is-done', it.completed);
+      chip.classList.toggle('is-done', it.completed);
       saveEvents(EVENTS);
     };
-    list.appendChild(row);
+    row.appendChild(chip);
   });
-  wrap.appendChild(list);
-  return wrap;
+  return row;
 }
 
 /* ---------------- share ---------------- */
