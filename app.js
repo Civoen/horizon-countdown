@@ -37,16 +37,17 @@ function loadEvents(){
         const to = ev.travelTo || {method:'',details:''};
         const home = ev.travelHome || {method:'',details:''};
         const method = to.method || home.method || '';
-        const details = [
-          to.details ? `There: ${to.details}` : '',
-          home.details ? `Back: ${home.details}` : '',
-        ].filter(Boolean).join(' · ');
+        const details = [to.details, home.details].filter(Boolean).join(' · ');
         ev.travel = { method, details };
         delete ev.travelTo;
         delete ev.travelHome;
         migrated = true;
       } else if(!ev.travel){
         ev.travel = { method:'', details:'' };
+      }
+      if(Array.isArray(ev.goingWith) && ev.goingWith.length && typeof ev.goingWith[0] === 'string'){
+        ev.goingWith = ev.goingWith.map(name => ({ id: uid(), name, coming: true }));
+        migrated = true;
       }
     });
     if(migrated) saveEvents(events);
@@ -67,8 +68,8 @@ let compactMode = loadCompact();
 
 function knownNames(){
   const tally = {};
-  EVENTS.forEach(ev => (ev.goingWith||[]).forEach(n=>{
-    const key = n.trim();
+  EVENTS.forEach(ev => (ev.goingWith||[]).forEach(p=>{
+    const key = (p.name||'').trim();
     if(!key) return;
     tally[key] = (tally[key]||0) + 1;
   }));
@@ -178,12 +179,31 @@ function runAutoArchive(){
 
 /* ---------------- toast ---------------- */
 let toastTimer;
-function showToast(msg){
+function showToast(msg, opts){
   const el = document.getElementById('toast');
-  el.textContent = msg;
+  el.innerHTML = '';
+  const text = document.createElement('span');
+  text.textContent = msg;
+  el.appendChild(text);
+  if(opts && opts.actionLabel){
+    const btn = document.createElement('button');
+    btn.className = 'toast-action';
+    btn.textContent = opts.actionLabel;
+    btn.onclick = ()=>{ opts.onAction && opts.onAction(); el.classList.remove('is-show'); };
+    el.appendChild(btn);
+  }
   el.classList.add('is-show');
   clearTimeout(toastTimer);
-  toastTimer = setTimeout(()=> el.classList.remove('is-show'), 2200);
+  toastTimer = setTimeout(()=> el.classList.remove('is-show'), (opts && opts.duration) || 4000);
+}
+
+// Short tactile tick for checklist toggles etc. iOS Safari has never
+// implemented the Vibration API (even for home-screen PWAs), so this is a
+// silent no-op there today — kept as progressive enhancement for Android,
+// and ready to swap for real haptics (@capacitor/haptics) if this ever
+// gets wrapped natively.
+function haptic(ms){
+  if(navigator.vibrate){ try{ navigator.vibrate(ms || 10); }catch(e){} }
 }
 
 /* ---------------- router ---------------- */
@@ -358,7 +378,7 @@ function renderHome(){
   const wrap = document.createElement('div');
   wrap.className = 'screen';
 
-  const upcoming = EVENTS.filter(e=>!e.completed).sort((a,b)=>{
+  const upcoming = EVENTS.filter(e=>!e.completed && !e._trashed).sort((a,b)=>{
     if(a.startDate !== b.startDate) return a.startDate < b.startDate ? -1 : 1;
     const at = a.time||'99:99', bt = b.time||'99:99';
     return at < bt ? -1 : at>bt ? 1 : 0;
@@ -405,13 +425,117 @@ function renderHome(){
   return wrap;
 }
 
+/* ---------------- swipe-to-archive / swipe-to-delete ---------------- */
+const SWIPE_REVEAL = 84;
+const SWIPE_TRIGGER = 46;
+
+function attachSwipe(fg, onOpenChange){
+  let startX=0, startY=0, dx=0, decided=null, dragging=false, open=0, moved=false;
+
+  fg.addEventListener('touchstart', (e)=>{
+    const t = e.touches[0];
+    startX = t.clientX; startY = t.clientY; dx = open===-1?-SWIPE_REVEAL:open===1?SWIPE_REVEAL:0;
+    dragging = true; decided = null; moved = false;
+    fg.classList.add('is-dragging'); fg.classList.remove('is-snapping');
+  }, {passive:true});
+
+  fg.addEventListener('touchmove', (e)=>{
+    if(!dragging) return;
+    const t = e.touches[0];
+    const rawDx = t.clientX - startX + (open===-1?-SWIPE_REVEAL:open===1?SWIPE_REVEAL:0);
+    const rawDy = t.clientY - startY;
+    if(decided===null){
+      if(Math.abs(t.clientX-startX) > 8 || Math.abs(rawDy) > 8){
+        decided = Math.abs(t.clientX-startX) > Math.abs(rawDy) ? 'h' : 'v';
+      }
+    }
+    if(decided !== 'h') return;
+    e.preventDefault();
+    moved = true;
+    const max = SWIPE_REVEAL + 24;
+    dx = Math.max(-max, Math.min(max, rawDx));
+    fg.style.transform = `translateX(${dx}px)`;
+  }, {passive:false});
+
+  const finish = ()=>{
+    dragging = false;
+    fg.classList.remove('is-dragging'); fg.classList.add('is-snapping');
+    if(decided === 'h'){
+      if(dx <= -SWIPE_TRIGGER){ open=-1; } else if(dx >= SWIPE_TRIGGER){ open=1; } else { open=0; }
+    }
+    fg.style.transform = open===-1?`translateX(-${SWIPE_REVEAL}px)`:open===1?`translateX(${SWIPE_REVEAL}px)`:'translateX(0)';
+    if(onOpenChange) onOpenChange(open);
+  };
+  fg.addEventListener('touchend', finish);
+  fg.addEventListener('touchcancel', finish);
+
+  return {
+    close(){ open=0; fg.classList.add('is-snapping'); fg.style.transform='translateX(0)'; },
+    wasDragged(){ return moved; },
+  };
+}
+
+function wrapWithSwipe(fg, { compact, onArchive, onDelete }){
+  const wrap = document.createElement('div');
+  wrap.className = 'swipe-wrap' + (compact ? ' is-compact' : '');
+
+  const archiveBtn = document.createElement('button');
+  archiveBtn.className = 'swipe-action swipe-action-archive';
+  archiveBtn.innerHTML = `${icon('check')}<span>Archive</span>`;
+
+  const deleteBtn = document.createElement('button');
+  deleteBtn.className = 'swipe-action swipe-action-delete';
+  deleteBtn.innerHTML = `${icon('trash')}<span>Delete</span>`;
+
+  fg.classList.add('swipe-fg');
+  wrap.appendChild(archiveBtn);
+  wrap.appendChild(deleteBtn);
+  wrap.appendChild(fg);
+
+  const ctrl = attachSwipe(fg);
+  archiveBtn.onclick = ()=>{ haptic(12); ctrl.close(); onArchive(); };
+  deleteBtn.onclick = ()=>{ haptic(12); ctrl.close(); onDelete(); };
+
+  // Suppress the tap-to-navigate click that follows a real drag.
+  const originalOnClick = fg.onclick;
+  fg.onclick = (e)=>{
+    if(ctrl.wasDragged()){ e.preventDefault(); e.stopPropagation(); return; }
+    if(originalOnClick) originalOnClick(e);
+  };
+
+  return wrap;
+}
+
+function quickArchiveEvent(ev){
+  ev.completed = true; ev.completedAt = todayStr();
+  saveEvents(EVENTS);
+  render();
+  showToast('Archived', { actionLabel:'Undo', onAction:()=>{
+    ev.completed = false; ev.completedAt = null;
+    saveEvents(EVENTS); render();
+  }});
+}
+
+function softDeleteEvent(ev, afterNavigate){
+  ev._trashed = true;
+  render();
+  if(afterNavigate) navigate(afterNavigate);
+  const timeoutId = setTimeout(()=>{
+    if(ev._trashed){ EVENTS = EVENTS.filter(e=>e.id!==ev.id); saveEvents(EVENTS); }
+  }, 5000);
+  showToast('Event deleted', { actionLabel:'Undo', duration:5000, onAction:()=>{
+    clearTimeout(timeoutId);
+    delete ev._trashed;
+    saveEvents(EVENTS);
+    render();
+  }});
+}
+
 function ticketCompactRow(ev){
   const row = document.createElement('div');
   row.className = 'ticket-compact';
   row.onclick = ()=> navigate('/event/' + ev.id);
   const cd = getCountdown(ev);
-  const metaParts = [formatDateShort(ev.startDate) + (ev.time?` · ${ev.time}`:'')];
-  if(ev.location) metaParts.push(ev.location);
 
   const main = document.createElement('div');
   main.className = 'tc-main';
@@ -419,7 +543,6 @@ function ticketCompactRow(ev){
     <div class="tc-info">
       <div class="tc-type-row">${TYPE_ICON[ev.type]||''} ${ev.type}</div>
       <div class="tc-title">${escapeHtml(ev.title)}</div>
-      <div class="tc-meta">${metaParts.map(escapeHtml).join(' · ')}</div>
     </div>
   `;
   row.appendChild(main);
@@ -439,7 +562,15 @@ function ticketCompactRow(ev){
     ${ev.ticketPurchased ? `<span class="pill pill-success pill-sm">${icon('ticket')}</span>` : ''}
   `;
   row.appendChild(foot);
-  return row;
+  return wrapWithSwipe(row, {
+    compact: true,
+    onArchive: ()=> quickArchiveEvent(ev),
+    onDelete: ()=> confirmSheet(
+      'Delete this event?',
+      'This can\u2019t be undone. All preparation details will be lost.',
+      'Delete', ()=> softDeleteEvent(ev)
+    ),
+  });
 }
 
 function emptyState(title, sub, cta, onClick){
@@ -469,7 +600,7 @@ function ticketCard(ev){
     <div class="ticket-meta">
       <div class="ticket-meta-row">${icon('calendar')} ${formatEventDate(ev)}${ev.time?` · ${ev.time}`:''}</div>
       ${ev.location ? `<div class="ticket-meta-row">${icon('pin')} ${escapeHtml(ev.location)}</div>` : ''}
-      ${ev.goingWith && ev.goingWith.length ? `<div class="ticket-meta-row ticket-people">${icon('people')} ${ev.goingWith.map(escapeHtml).join(' · ')}</div>` : ''}
+      ${ev.goingWith && ev.goingWith.filter(p=>p.coming!==false).length ? `<div class="ticket-meta-row ticket-people">${icon('people')} ${ev.goingWith.filter(p=>p.coming!==false).map(p=>escapeHtml(p.name)).join(' · ')}</div>` : ''}
     </div>`;
   card.appendChild(main);
 
@@ -488,7 +619,15 @@ function ticketCard(ev){
     ${ev.ticketPurchased ? `<span class="pill pill-success">${icon('ticket')} Purchased</span>` : ''}
   `;
   card.appendChild(foot);
-  return card;
+  return wrapWithSwipe(card, {
+    compact: false,
+    onArchive: ()=> quickArchiveEvent(ev),
+    onDelete: ()=> confirmSheet(
+      'Delete this event?',
+      'This can\u2019t be undone. All preparation details will be lost.',
+      'Delete', ()=> softDeleteEvent(ev)
+    ),
+  });
 }
 
 function escapeHtml(s){
@@ -508,7 +647,7 @@ function renderArchive(){
   head.innerHTML = `<div><div class="wordmark">ARCHIVE</div><div class="page-sub">What you've been to</div></div>`;
   wrap.appendChild(head);
 
-  const all = EVENTS.filter(e=>e.completed).sort((a,b)=>{
+  const all = EVENTS.filter(e=>e.completed && !e._trashed).sort((a,b)=>{
     const at=a.completedAt||a.endDate||a.startDate, bt=b.completedAt||b.endDate||b.startDate;
     return at>bt?-1:1;
   });
@@ -630,7 +769,7 @@ function renderForm(existing, liveDraft, liveMultiDay, livePresetsTouched, liveI
     md.type = 'button';
     md.className = 'multiday-toggle' + (multiDay ? ' is-on' : '');
     md.innerHTML = `<span class="md-box">${icon('check')}</span> Multi-day event`;
-    md.onclick = ()=>{ multiDay = !multiDay; if(!multiDay) draft.endDate=null; else draft.endDate = draft.endDate || draft.startDate; renderInto(); };
+    md.onclick = ()=>{ haptic(10); multiDay = !multiDay; if(!multiDay) draft.endDate=null; else draft.endDate = draft.endDate || draft.startDate; renderInto(); };
     box.appendChild(md);
     return box;
   }));
@@ -671,7 +810,7 @@ function renderForm(existing, liveDraft, liveMultiDay, livePresetsTouched, liveI
     const addName = (val)=>{
       const v = (val!==undefined ? val : i.value).trim();
       if(!v) return;
-      draft.goingWith.push(v); i.value='';
+      draft.goingWith.push({ id: uid(), name: v, coming: true }); i.value='';
       renderInto();
     };
     i.onkeydown = (e)=>{ if(e.key==='Enter'){ e.preventDefault(); addName(); } };
@@ -679,7 +818,7 @@ function renderForm(existing, liveDraft, liveMultiDay, livePresetsTouched, liveI
     row.appendChild(i); row.appendChild(addBtn);
     box.appendChild(row);
 
-    const already = draft.goingWith.map(n=>n.toLowerCase());
+    const already = draft.goingWith.map(p=>p.name.toLowerCase());
     const suggestions = knownNames().filter(n => !already.includes(n.toLowerCase())).slice(0, 8);
     if(suggestions.length){
       const label = document.createElement('div'); label.className='suggest-label'; label.textContent = 'Suggestions';
@@ -696,9 +835,9 @@ function renderForm(existing, liveDraft, liveMultiDay, livePresetsTouched, liveI
 
     if(draft.goingWith.length){
       const tags = document.createElement('div'); tags.className='name-tags';
-      draft.goingWith.forEach((name, idx)=>{
+      draft.goingWith.forEach((person, idx)=>{
         const t = document.createElement('span'); t.className='name-tag';
-        t.innerHTML = `${escapeHtml(name)} <button type="button">${icon('x')}</button>`;
+        t.innerHTML = `${escapeHtml(person.name)} <button type="button">${icon('x')}</button>`;
         t.querySelector('button').onclick = ()=>{ draft.goingWith.splice(idx,1); renderInto(); };
         tags.appendChild(t);
       });
@@ -880,12 +1019,7 @@ function renderDetail(id){
   actions.querySelector('#deleteBtn').onclick = ()=> confirmSheet(
     'Delete this event?',
     'This can\u2019t be undone. All preparation details will be lost.',
-    'Delete', ()=>{
-      EVENTS = EVENTS.filter(e=>e.id!==ev.id);
-      saveEvents(EVENTS);
-      showToast('Event deleted');
-      navigate('/home');
-    }
+    'Delete', ()=> softDeleteEvent(ev, ev.completed ? '/archive' : '/home')
   );
   wrap.appendChild(actions);
 
@@ -918,7 +1052,18 @@ function renderDetail(id){
 
   if(ev.goingWith && ev.goingWith.length){
     const tl = document.createElement('div'); tl.className='tag-list'; tl.style.marginBottom='4px';
-    ev.goingWith.forEach(n=>{ const t=document.createElement('span'); t.className='tag'; t.textContent=n; tl.appendChild(t); });
+    ev.goingWith.forEach(person=>{
+      const t=document.createElement('span');
+      t.className='tag tag-toggle' + (person.coming===false ? ' is-not-coming' : '');
+      t.textContent=person.name;
+      t.onclick = ()=>{
+        person.coming = person.coming===false ? true : false;
+        haptic(10);
+        t.classList.toggle('is-not-coming', person.coming===false);
+        saveEvents(EVENTS);
+      };
+      tl.appendChild(t);
+    });
     wrap.appendChild(tl);
   }
 
@@ -931,6 +1076,7 @@ function renderDetail(id){
   const tSwitch = document.createElement('div'); tSwitch.className = 'switch' + (ev.ticketPurchased?' is-on':'');
   tSwitch.onclick = (e)=>{
     e.stopPropagation();
+    haptic(10);
     ev.ticketPurchased = !ev.ticketPurchased;
     tSwitch.classList.toggle('is-on', ev.ticketPurchased);
     ticketLine.querySelector('span').textContent = ev.ticketPurchased ? 'Ticket purchased' : 'Not purchased yet';
@@ -980,6 +1126,7 @@ function chipChecklist(items){
     chip.className = 'chip-check' + (it.completed?' is-done':'');
     chip.innerHTML = `<span class="cc-box">${icon('check')}</span><span>${escapeHtml(it.text)}</span>`;
     chip.onclick = ()=>{
+      haptic(10);
       it.completed = !it.completed;
       chip.classList.toggle('is-done', it.completed);
       saveEvents(EVENTS);
@@ -993,7 +1140,8 @@ function chipChecklist(items){
 function shareEvent(ev, includePrep){
   let text = `${ev.title.toUpperCase()}\n${formatEventDate(ev)}${ev.time?` · ${ev.time}`:''}\n`;
   if(ev.location) text += `📍 ${ev.location}\n`;
-  if(ev.goingWith && ev.goingWith.length) text += `👥 ${ev.goingWith.join(' · ')}\n`;
+  const coming = (ev.goingWith||[]).filter(p=>p.coming!==false).map(p=>p.name);
+  if(coming.length) text += `👥 ${coming.join(' · ')}\n`;
   text += ev.ticketPurchased ? `🎟 Ticket purchased\n` : '';
 
   if(includePrep){

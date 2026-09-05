@@ -255,11 +255,10 @@ input, select, textarea{ font-family: inherit; }
   transition: transform .16s ease;
 }
 .ticket-compact:active{ transform: scale(.985); }
-.tc-main{ display:flex; align-items:flex-start; justify-content:space-between; gap:10px; padding: 13px 16px 10px; }
+.tc-main{ display:flex; align-items:center; justify-content:space-between; gap:10px; padding: 14px 16px 12px; }
 .tc-info{ min-width:0; }
-.tc-type-row{ font-size:9.5px; font-weight:700; letter-spacing:.05em; color: var(--accent); text-transform:uppercase; margin-bottom:4px; }
-.tc-title{ font-family: var(--font-display); font-size:19px; color: var(--text); line-height:1.05; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
-.tc-meta{ font-size:11.5px; color: var(--text-faint); margin-top:4px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.tc-type-row{ font-size:9.5px; font-weight:700; letter-spacing:.05em; color: var(--accent); text-transform:uppercase; margin-bottom:5px; }
+.tc-title{ font-family: var(--font-display); font-size:24px; color: var(--text); line-height:1.02; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
 .tc-perf{ position:relative; height:0; border-top:2px dashed rgba(255,255,255,.12); margin:0 14px; }
 .tc-perf::before, .tc-perf::after{ content:""; position:absolute; top:-7px; width:14px; height:14px; background: var(--bg); border-radius:50%; }
 .tc-perf::before{ left:-21px; }
@@ -272,6 +271,24 @@ input, select, textarea{ font-family: inherit; }
 .tc-cd.is-urgent{ color: var(--accent-2); }
 .tc-cd.is-urgent .tc-cd-unit{ color: var(--accent-2); }
 .pill-sm{ font-size:10px; padding:4px 9px; }
+
+/* ============================================================
+   Swipe actions (Home list rows) — branded archive/delete reveal
+   ============================================================ */
+.swipe-wrap{ position:relative; border-radius: var(--radius-lg); overflow:hidden; }
+.swipe-wrap.is-compact{ border-radius: 16px; }
+.swipe-action{
+  position:absolute; top:0; bottom:0; width:84px;
+  display:flex; flex-direction:column; align-items:center; justify-content:center; gap:5px;
+  color:#fff; font-size:10.5px; font-weight:700; letter-spacing:.03em; text-transform:uppercase;
+  border:none; cursor:pointer;
+}
+.swipe-action svg{ width:19px; height:19px; stroke:#fff; fill:none; stroke-width:2; }
+.swipe-action-archive{ left:0; background: var(--accent); }
+.swipe-action-delete{ right:0; background: var(--danger); }
+.swipe-fg{ position:relative; z-index:2; touch-action: pan-y; }
+.swipe-fg.is-dragging{ transition:none; }
+.swipe-fg.is-snapping{ transition: transform .22s cubic-bezier(.2,.7,.3,1); }
 
 /* ============================================================
    Empty states
@@ -470,6 +487,8 @@ input, select, textarea{ font-family: inherit; }
 
 .tag-list{ display:flex; flex-wrap:wrap; gap:6px; }
 .tag{ background: var(--surface-2); border:1px solid var(--border); padding:5px 11px; border-radius:999px; font-size:12.5px; }
+.tag-toggle{ cursor:pointer; user-select:none; transition: all .14s ease; }
+.tag-toggle.is-not-coming{ background:transparent; border-style:dashed; color: var(--text-faint); text-decoration: line-through; }
 
 .chip-check-row{ display:flex; flex-wrap:wrap; gap:7px; }
 .chip-check{
@@ -548,12 +567,17 @@ input, select, textarea{ font-family: inherit; }
   transform: translate(-50%, 12px);
   background: var(--surface-2); border:1px solid var(--border-strong);
   color: var(--text); font-size:13.5px; font-weight:600;
-  padding: 12px 18px; border-radius: 999px;
+  padding: 12px 16px; border-radius: 999px;
   opacity:0; pointer-events:none; transition: opacity .22s ease, transform .22s ease;
   z-index: 80; white-space:nowrap;
   box-shadow: 0 10px 30px rgba(0,0,0,0.4);
+  display:flex; align-items:center; gap:12px;
 }
-.toast.is-show{ opacity:1; transform: translate(-50%, 0); }
+.toast.is-show{ opacity:1; transform: translate(-50%, 0); pointer-events:auto; }
+.toast-action{
+  background:none; border:none; color: var(--accent); font-weight:800; font-size:13px;
+  letter-spacing:.02em; cursor:pointer; padding:0; flex-shrink:0;
+}
 
 @media (min-width: 860px){
   .toast{ left: calc(50% + 100px); bottom: 28px; }
