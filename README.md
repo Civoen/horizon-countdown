@@ -7,6 +7,27 @@ what you need to sort out beforehand.
 It's plain HTML/CSS/JS — no build step, no framework, no backend. All event
 data is stored in the browser's `localStorage`, on-device only.
 
+## Your data and redeploying
+
+All events live in this browser's `localStorage`, tied to the exact URL
+(origin) the app is served from. A code update to the **same URL** never
+touches that data — but if you redeploy to a **different URL** (a fresh
+Netlify Drop gives you a new random subdomain every time; a renamed
+GitHub repo changes the Pages URL), that's a different origin as far as
+the browser is concerned, so it starts with empty storage. This is almost
+certainly what happened if events vanished after an update — always
+redeploy over the same URL your home-screen icon points at.
+
+Two safety nets are built in either way:
+
+- The app asks the browser for **persistent storage** on load
+  (`navigator.storage.persist()`), which lowers the odds Safari clears
+  site data on its own under low-disk conditions. It's a request, not a
+  guarantee.
+- A **Backup & restore** panel — the gear icon on the Home screen — lets
+  you download or copy a JSON snapshot of everything, and restore from
+  one. Worth doing before you redeploy, switch phones, or reinstall.
+
 ## Files
 
 ```
@@ -70,8 +91,10 @@ touching Xcode much.
 
 Home, Archive, Add/Edit event, event detail, multi-day events, live
 countdown states (DAYS / TOMORROW / TODAY / TONIGHT / HAPPENING NOW),
-going-with names, ticket-purchased toggle, travel (there & back) notes,
-things-to-bring and before-you-go checklists with type-based starter
-presets, mark-as-completed, automatic archiving the day after an event
-ends, delete with confirmation, share event / share preparation (native
-share sheet on iOS, clipboard fallback elsewhere), and empty states.
+going-with names with suggestions from people you've added before,
+ticket-purchased toggle, a single travel note, a before-you-go checklist
+with type-based starter presets, mark-as-completed, automatic archiving
+the day after an event ends, delete with confirmation, share event /
+share preparation (native share sheet on iOS, clipboard fallback
+elsewhere), a compact home-screen view, backup & restore, and empty
+states.

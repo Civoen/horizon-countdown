@@ -11,26 +11,46 @@ const TYPE_ICON = {
   Concert:'🎤', Festival:'🎪', Sport:'🏟️', Gaming:'🎮', Trip:'✈️', Theatre:'🎭', Other:'📌'
 };
 
-const TRAVEL_METHODS = ['Driving','Train','Bus','Taxi / Uber','Walking','Flying','Other'];
+const TRAVEL_METHODS = ['Driving','Train','Bus','Other'];
 const TRAVEL_ICON = {
-  'Driving':'car','Train':'train','Bus':'bus','Taxi / Uber':'car','Walking':'walk','Flying':'plane','Other':'dot'
+  'Driving':'car','Train':'train','Bus':'bus','Other':'dot'
 };
 
 const PRESETS = {
-  Concert:  { bring:['Ticket','ID','Phone','Power bank','Earplugs'], tasks:['Check travel','Check ticket'] },
-  Festival: { bring:['Ticket','ID','Phone','Power bank','Tent','Sleeping bag','Waterproofs'], tasks:['Check travel','Check ticket','Pack bag'] },
-  Sport:    { bring:['Ticket','ID','Phone','Team colours'], tasks:['Check travel','Check ticket'] },
-  Gaming:   { bring:['Ticket','ID','Phone','Charger'], tasks:['Check travel','Check ticket'] },
-  Trip:     { bring:['ID / passport','Phone','Charger','Wallet'], tasks:['Check travel','Pack bag'] },
-  Theatre:  { bring:['Ticket','ID','Phone'], tasks:['Check travel','Check ticket'] },
-  Other:    { bring:['Ticket','Phone'], tasks:['Check travel'] },
+  Concert:  { tasks:['Check travel','Check ticket'] },
+  Festival: { tasks:['Check travel','Check ticket','Pack bag'] },
+  Sport:    { tasks:['Check travel','Check ticket'] },
+  Gaming:   { tasks:['Check travel','Check ticket'] },
+  Trip:     { tasks:['Check travel','Pack bag'] },
+  Theatre:  { tasks:['Check travel','Check ticket'] },
+  Other:    { tasks:['Check travel'] },
 };
 
 /* ---------------- storage ---------------- */
 function loadEvents(){
   try{
     const raw = localStorage.getItem(STORAGE_KEY);
-    return raw ? JSON.parse(raw) : [];
+    const events = raw ? JSON.parse(raw) : [];
+    let migrated = false;
+    events.forEach(ev=>{
+      if(!ev.travel && (ev.travelTo || ev.travelHome)){
+        const to = ev.travelTo || {method:'',details:''};
+        const home = ev.travelHome || {method:'',details:''};
+        const method = to.method || home.method || '';
+        const details = [
+          to.details ? `There: ${to.details}` : '',
+          home.details ? `Back: ${home.details}` : '',
+        ].filter(Boolean).join(' · ');
+        ev.travel = { method, details };
+        delete ev.travelTo;
+        delete ev.travelHome;
+        migrated = true;
+      } else if(!ev.travel){
+        ev.travel = { method:'', details:'' };
+      }
+    });
+    if(migrated) saveEvents(events);
+    return events;
   }catch(e){ return []; }
 }
 function saveEvents(events){
@@ -179,12 +199,107 @@ window.addEventListener('hashchange', render);
 window.addEventListener('DOMContentLoaded', ()=>{
   runAutoArchive();
   render();
+  requestPersistentStorage();
   document.getElementById('nav').addEventListener('click', (e)=>{
     const btn = e.target.closest('.nav-btn');
     if(!btn) return;
     navigate('/' + btn.dataset.route);
   });
 });
+
+// Ask the browser not to evict this site's storage under disk pressure.
+// Doesn't guarantee anything, but meaningfully lowers the odds Safari
+// clears localStorage on its own — belt-and-braces alongside backups.
+function requestPersistentStorage(){
+  if(navigator.storage && navigator.storage.persist){
+    navigator.storage.persist().catch(()=>{});
+  }
+}
+
+/* ---------------- backup / restore ---------------- */
+function exportPayload(){
+  return JSON.stringify({ app:'Horizon', version:1, exportedAt: new Date().toISOString(), events: EVENTS }, null, 2);
+}
+function downloadBackup(){
+  const blob = new Blob([exportPayload()], { type:'application/json' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `horizon-backup-${todayStr()}.json`;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(()=> URL.revokeObjectURL(url), 2000);
+}
+function copyBackup(){
+  if(navigator.clipboard){
+    navigator.clipboard.writeText(exportPayload()).then(()=> showToast('Backup copied to clipboard'));
+  } else {
+    showToast('Clipboard isn\u2019t available here');
+  }
+}
+function importFromText(text){
+  let parsed;
+  try{ parsed = JSON.parse(text); }
+  catch(e){ showToast('That doesn\u2019t look like a valid backup file'); return; }
+  const incoming = Array.isArray(parsed) ? parsed : parsed.events;
+  if(!Array.isArray(incoming)){ showToast('No events found in that file'); return; }
+  confirmSheet(
+    'Restore this backup?',
+    `This will add ${incoming.length} event${incoming.length===1?'':'s'} from the backup. Events already on this device won\u2019t be duplicated or removed.`,
+    'Restore',
+    ()=>{
+      const existingIds = new Set(EVENTS.map(e=>e.id));
+      let added = 0;
+      incoming.forEach(ev=>{
+        if(ev && ev.id && !existingIds.has(ev.id)){
+          EVENTS.push(ev); existingIds.add(ev.id); added++;
+        }
+      });
+      saveEvents(EVENTS);
+      showToast(`Restored ${added} event${added===1?'':'s'}`);
+      render();
+    }
+  );
+}
+
+function openBackupSheet(){
+  const overlay = document.createElement('div'); overlay.className='overlay';
+  overlay.innerHTML = `
+    <div class="sheet">
+      <div class="sheet-title">Backup &amp; restore</div>
+      <div class="sheet-body">
+        Your events live only on this device. Save a backup before switching
+        phones, reinstalling, or if you're redeploying this app to a new
+        web address — a new URL starts with empty storage.
+      </div>
+      <div style="display:flex;flex-direction:column;gap:10px;">
+        <button class="btn btn-ghost btn-block" id="dlBtn">${icon('download')} Download backup file</button>
+        <button class="btn btn-ghost btn-block" id="cpBtn">${icon('copy')} Copy backup as text</button>
+        <label class="btn btn-ghost btn-block" style="cursor:pointer;">
+          ${icon('upload')} Restore from file
+          <input type="file" accept="application/json" id="fileInput" style="display:none;">
+        </label>
+      </div>
+      <div class="sheet-actions" style="margin-top:18px;">
+        <button class="btn btn-text" id="closeBtn" style="flex:1;">Close</button>
+      </div>
+    </div>`;
+  document.body.appendChild(overlay);
+  requestAnimationFrame(()=> overlay.classList.add('is-open'));
+  const close = ()=>{ overlay.classList.remove('is-open'); setTimeout(()=>overlay.remove(), 200); };
+  overlay.addEventListener('click', (e)=>{ if(e.target===overlay) close(); });
+  overlay.querySelector('#closeBtn').onclick = close;
+  overlay.querySelector('#dlBtn').onclick = downloadBackup;
+  overlay.querySelector('#cpBtn').onclick = copyBackup;
+  overlay.querySelector('#fileInput').onchange = (e)=>{
+    const file = e.target.files[0];
+    if(!file) return;
+    const reader = new FileReader();
+    reader.onload = ()=> { close(); importFromText(reader.result); };
+    reader.readAsText(file);
+  };
+}
 
 /* ---------------- render dispatch ---------------- */
 function render(){
@@ -229,6 +344,10 @@ const ICONS = {
   plus: '<svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>',
   rows: '<svg viewBox="0 0 24 24"><rect x="4" y="5" width="16" height="4.5" rx="1.3"/><rect x="4" y="14.5" width="16" height="4.5" rx="1.3"/></svg>',
   squares: '<svg viewBox="0 0 24 24"><rect x="4" y="4" width="7" height="7" rx="1.3"/><rect x="13" y="4" width="7" height="7" rx="1.3"/><rect x="4" y="13" width="7" height="7" rx="1.3"/><rect x="13" y="13" width="7" height="7" rx="1.3"/></svg>',
+  gear: '<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 13.5a1.7 1.7 0 0 0 .34 1.87l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.7 1.7 0 0 0-1.87-.34 1.7 1.7 0 0 0-1.04 1.56V19.5a2 2 0 1 1-4 0v-.09a1.7 1.7 0 0 0-1.04-1.56 1.7 1.7 0 0 0-1.87.34l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.7 1.7 0 0 0 .34-1.87 1.7 1.7 0 0 0-1.56-1.04H4.5a2 2 0 1 1 0-4h.09a1.7 1.7 0 0 0 1.56-1.04 1.7 1.7 0 0 0-.34-1.87l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.7 1.7 0 0 0 1.87.34H10a1.7 1.7 0 0 0 1.04-1.56V4.5a2 2 0 1 1 4 0v.09a1.7 1.7 0 0 0 1.04 1.56 1.7 1.7 0 0 0 1.87-.34l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.7 1.7 0 0 0-.34 1.87V10a1.7 1.7 0 0 0 1.56 1.04h.09a2 2 0 1 1 0 4h-.09a1.7 1.7 0 0 0-1.56 1.04Z"/></svg>',
+  download: '<svg viewBox="0 0 24 24"><path d="M12 4v11m0 0-4-4m4 4 4-4"/><path d="M5 17v2a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-2"/></svg>',
+  upload: '<svg viewBox="0 0 24 24"><path d="M12 20V9m0 0-4 4m4-4 4 4"/><path d="M5 17v2a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-2"/></svg>',
+  copy: '<svg viewBox="0 0 24 24"><rect x="8" y="8" width="12" height="12" rx="2"/><path d="M5 15.5A1.5 1.5 0 0 1 3.5 14V5.5A1.5 1.5 0 0 1 5 4h8.5A1.5 1.5 0 0 1 15 5.5"/></svg>',
 };
 function icon(name){ return ICONS[name] || ''; }
 
@@ -249,16 +368,25 @@ function renderHome(){
   head.className = 'page-head';
   head.style.alignItems = 'center';
   head.innerHTML = `
-    <div class="page-sub" style="font-size:15px;font-weight:600;color:var(--text);">${upcoming.length ? `${upcoming.length} thing${upcoming.length===1?'':'s'} coming up` : 'Nothing on the horizon'}</div>
+    <div class="page-sub" style="font-size:15px;font-weight:600;color:var(--text);">${upcoming.length ? `${upcoming.length} event${upcoming.length===1?'':'s'} coming up` : 'Nothing on the horizon'}</div>
   `;
+  const headBtns = document.createElement('div');
+  headBtns.style.cssText = 'display:flex;gap:8px;';
+  const backupBtn = document.createElement('button');
+  backupBtn.className = 'icon-btn';
+  backupBtn.setAttribute('aria-label', 'Backup and restore');
+  backupBtn.innerHTML = icon('gear');
+  backupBtn.onclick = openBackupSheet;
+  headBtns.appendChild(backupBtn);
   if(upcoming.length){
     const toggle = document.createElement('button');
     toggle.className = 'icon-btn';
     toggle.setAttribute('aria-label', compactMode ? 'Switch to card view' : 'Switch to compact view');
     toggle.innerHTML = compactMode ? icon('squares') : icon('rows');
     toggle.onclick = ()=>{ compactMode = !compactMode; saveCompact(compactMode); render(); };
-    head.appendChild(toggle);
+    headBtns.appendChild(toggle);
   }
+  head.appendChild(headBtns);
   wrap.appendChild(head);
 
   if(!upcoming.length){
@@ -428,8 +556,8 @@ function blankEvent(){
   return {
     id: uid(), title:'', type:'Concert', startDate: todayStr(), endDate: null, time:'',
     location:'', goingWith:[], ticketPurchased:false,
-    travelTo:{method:'', details:''}, travelHome:{method:'', details:''},
-    bringItems:[], prepTasks:[],
+    travel:{method:'', details:''},
+    prepTasks:[],
     autoArchive:true, completed:false, completedAt:null,
     createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(),
   };
@@ -473,7 +601,6 @@ function renderForm(existing, liveDraft, liveMultiDay, livePresetsTouched, liveI
         draft.type = t;
         if(!presetsTouched){
           const p = PRESETS[t];
-          draft.bringItems = p.bring.map(text=>({id:uid(), text, completed:false}));
           draft.prepTasks = p.tasks.map(text=>({id:uid(), text, completed:false}));
         }
         renderInto();
@@ -511,8 +638,19 @@ function renderForm(existing, liveDraft, liveMultiDay, livePresetsTouched, liveI
   // -- Time
   form.appendChild(field('Time (optional)', ()=>{
     const i = document.createElement('input');
-    i.type='time'; i.className='input'; i.value = draft.time || '';
-    i.oninput = ()=> draft.time = i.value;
+    i.type='text'; i.inputMode='numeric'; i.className='input'; i.placeholder='19:30'; i.maxLength=5;
+    i.value = draft.time || '';
+    i.oninput = ()=>{
+      let v = i.value.replace(/[^\d]/g,'').slice(0,4);
+      if(v.length >= 3) v = v.slice(0,2) + ':' + v.slice(2);
+      i.value = v;
+      draft.time = v.length===5 ? v : '';
+    };
+    i.onblur = ()=>{
+      const m = i.value.match(/^([01]?\d|2[0-3]):([0-5]\d)$/);
+      if(i.value && !m){ i.value=''; draft.time=''; showToast('Enter time as HH:MM'); return; }
+      if(m){ i.value = m[1].padStart(2,'0') + ':' + m[2]; draft.time = i.value; }
+    };
     return i;
   }));
 
@@ -578,11 +716,9 @@ function renderForm(existing, liveDraft, liveMultiDay, livePresetsTouched, liveI
   const prepHint = document.createElement('div'); prepHint.className='section-hint'; prepHint.textContent="What do you need to sort out before you go?";
   form.appendChild(prepHint);
 
-  form.appendChild(travelField('Getting there', draft.travelTo, (m,d)=>{ draft.travelTo.method=m; draft.travelTo.details=d; }));
-  form.appendChild(travelField('Getting home', draft.travelHome, (m,d)=>{ draft.travelHome.method=m; draft.travelHome.details=d; }));
+  form.appendChild(travelField('Travel', draft.travel, (m,d)=>{ draft.travel.method=m; draft.travel.details=d; }));
 
   // -- Things to bring
-  form.appendChild(checklistField('Things to bring', draft.bringItems, ()=>{ presetsTouched = true; }));
   // -- Before you go
   form.appendChild(checklistField('Before you go', draft.prepTasks, ()=>{ presetsTouched = true; }));
 
@@ -803,22 +939,12 @@ function renderDetail(id){
   ticketLine.appendChild(tSwitch);
   infoCard.appendChild(ticketLine);
 
-  if(ev.travelTo && ev.travelTo.method){
-    infoCard.appendChild(prepLine('There', ev.travelTo));
-  }
-  if(ev.travelHome && ev.travelHome.method){
-    infoCard.appendChild(prepLine('Home', ev.travelHome));
+  if(ev.travel && ev.travel.method){
+    infoCard.appendChild(prepLine(ev.travel));
   }
   wrap.appendChild(infoCard);
 
   // -- Bring / Tasks as compact wrapping chip checklists --
-  if(ev.bringItems && ev.bringItems.length){
-    const sec = document.createElement('div'); sec.className='detail-section';
-    sec.innerHTML = `<div class="section-label">Things to bring</div>`;
-    sec.appendChild(chipChecklist(ev.bringItems));
-    wrap.appendChild(sec);
-  }
-
   if(ev.prepTasks && ev.prepTasks.length){
     const sec = document.createElement('div'); sec.className='detail-section';
     sec.innerHTML = `<div class="section-label">Before you go</div>`;
@@ -840,10 +966,10 @@ function renderDetail(id){
   return wrap;
 }
 
-function prepLine(label, obj){
+function prepLine(obj){
   const line = document.createElement('div');
   line.className = 'prep-line';
-  line.innerHTML = `${icon(TRAVEL_ICON[obj.method]||'dot')} <b>${label}:</b> ${escapeHtml(obj.method)}${obj.details ? ' — '+escapeHtml(obj.details) : ''}`;
+  line.innerHTML = `${icon(TRAVEL_ICON[obj.method]||'dot')} <span>${escapeHtml(obj.method)}${obj.details ? ' — '+escapeHtml(obj.details) : ''}</span>`;
   return line;
 }
 
@@ -871,14 +997,8 @@ function shareEvent(ev, includePrep){
   text += ev.ticketPurchased ? `🎟 Ticket purchased\n` : '';
 
   if(includePrep){
-    if(ev.travelTo && ev.travelTo.method){
-      text += `\nGetting there: ${ev.travelTo.method}${ev.travelTo.details ? ' — '+ev.travelTo.details : ''}`;
-    }
-    if(ev.travelHome && ev.travelHome.method){
-      text += `\nGetting home: ${ev.travelHome.method}${ev.travelHome.details ? ' — '+ev.travelHome.details : ''}`;
-    }
-    if(ev.bringItems && ev.bringItems.length){
-      text += `\n\nThings to bring:\n` + ev.bringItems.map(i=>`${i.completed?'✓':'○'} ${i.text}`).join('\n');
+    if(ev.travel && ev.travel.method){
+      text += `\nTravel: ${ev.travel.method}${ev.travel.details ? ' — '+ev.travel.details : ''}`;
     }
     if(ev.prepTasks && ev.prepTasks.length){
       text += `\n\nBefore you go:\n` + ev.prepTasks.map(i=>`${i.completed?'✓':'○'} ${i.text}`).join('\n');

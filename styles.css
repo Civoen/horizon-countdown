@@ -97,6 +97,8 @@ input, select, textarea{ font-family: inherit; }
   align-items: center;
   justify-content: space-around;
   z-index: 40;
+  transform: translateZ(0);
+  will-change: backdrop-filter;
 }
 .nav-btn{
   background:none; border:none; color: var(--text-faint);
@@ -105,8 +107,11 @@ input, select, textarea{ font-family: inherit; }
   font-size: 11px; font-weight:600; letter-spacing:.02em;
   cursor:pointer;
   transition: color .18s ease, transform .18s ease;
+  transform: translateZ(0);
+  -webkit-tap-highlight-color: transparent;
+  touch-action: manipulation;
 }
-.nav-btn:active{ transform: scale(.92); }
+.nav-btn:active{ transform: translateZ(0) scale(.92); }
 .nav-btn.is-active{ color: var(--text); }
 .nav-icon{
   width:24px; height:24px;
@@ -120,9 +125,10 @@ input, select, textarea{ font-family: inherit; }
   margin-top: -28px;
   box-shadow: 0 8px 24px rgba(124,92,255,0.45);
   padding:0; justify-content:center;
+  transform: translateZ(0);
 }
 .nav-add .nav-icon-add{ stroke: var(--bg); stroke-width:2.2; width:22px; height:22px; }
-.nav-add:active{ transform: scale(.9); }
+.nav-add:active{ transform: translateZ(0) scale(.9); }
 
 @media (min-width: 860px){
   body{ display:flex; }
