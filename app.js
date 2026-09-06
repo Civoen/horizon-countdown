@@ -237,6 +237,14 @@ function requestPersistentStorage(){
 }
 
 /* ---------------- backup / restore ---------------- */
+const LAST_BACKUP_KEY = 'horizon_last_backup_v1';
+function markBackedUp(){ localStorage.setItem(LAST_BACKUP_KEY, new Date().toISOString()); }
+function daysSinceBackup(){
+  const raw = localStorage.getItem(LAST_BACKUP_KEY);
+  if(!raw) return null;
+  return daysBetween(new Date(raw), new Date());
+}
+
 function exportPayload(){
   return JSON.stringify({ app:'Horizon', version:1, exportedAt: new Date().toISOString(), events: EVENTS }, null, 2);
 }
@@ -250,10 +258,11 @@ function downloadBackup(){
   a.click();
   a.remove();
   setTimeout(()=> URL.revokeObjectURL(url), 2000);
+  markBackedUp();
 }
 function copyBackup(){
   if(navigator.clipboard){
-    navigator.clipboard.writeText(exportPayload()).then(()=> showToast('Backup copied to clipboard'));
+    navigator.clipboard.writeText(exportPayload()).then(()=> { showToast('Backup copied to clipboard'); markBackedUp(); });
   } else {
     showToast('Clipboard isn\u2019t available here');
   }
@@ -277,17 +286,22 @@ function importFromText(text){
         }
       });
       saveEvents(EVENTS);
+      markBackedUp();
       showToast(`Restored ${added} event${added===1?'':'s'}`);
       render();
     }
   );
 }
 
+
 function openBackupSheet(){
   const overlay = document.createElement('div'); overlay.className='overlay';
   overlay.innerHTML = `
     <div class="sheet">
-      <div class="sheet-title">Backup &amp; restore</div>
+      <div class="sheet-title" style="display:flex;align-items:center;gap:10px;">
+        <span class="sheet-icon-badge">${icon('ticketShield')}</span>
+        Backup &amp; restore
+      </div>
       <div class="sheet-body">
         Your events live only on this device. Save a backup before switching
         phones, reinstalling, or if you're redeploying this app to a new
@@ -365,6 +379,7 @@ const ICONS = {
   rows: '<svg viewBox="0 0 24 24"><rect x="4" y="5" width="16" height="4.5" rx="1.3"/><rect x="4" y="14.5" width="16" height="4.5" rx="1.3"/></svg>',
   squares: '<svg viewBox="0 0 24 24"><rect x="4" y="4" width="7" height="7" rx="1.3"/><rect x="13" y="4" width="7" height="7" rx="1.3"/><rect x="4" y="13" width="7" height="7" rx="1.3"/><rect x="13" y="13" width="7" height="7" rx="1.3"/></svg>',
   gear: '<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 13.5a1.7 1.7 0 0 0 .34 1.87l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.7 1.7 0 0 0-1.87-.34 1.7 1.7 0 0 0-1.04 1.56V19.5a2 2 0 1 1-4 0v-.09a1.7 1.7 0 0 0-1.04-1.56 1.7 1.7 0 0 0-1.87.34l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.7 1.7 0 0 0 .34-1.87 1.7 1.7 0 0 0-1.56-1.04H4.5a2 2 0 1 1 0-4h.09a1.7 1.7 0 0 0 1.56-1.04 1.7 1.7 0 0 0-.34-1.87l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.7 1.7 0 0 0 1.87.34H10a1.7 1.7 0 0 0 1.04-1.56V4.5a2 2 0 1 1 4 0v.09a1.7 1.7 0 0 0 1.04 1.56 1.7 1.7 0 0 0 1.87-.34l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.7 1.7 0 0 0-.34 1.87V10a1.7 1.7 0 0 0 1.56 1.04h.09a2 2 0 1 1 0 4h-.09a1.7 1.7 0 0 0-1.56 1.04Z"/></svg>',
+  ticketShield: '<svg viewBox="0 0 24 24"><path d="M12 3.5 19 6.3v5.4c0 4.7-3 8.6-7 9.8-4-1.2-7-5.1-7-9.8V6.3l7-2.8Z"/><path d="M9 12.2l2.1 2.1L15.5 10" stroke-linecap="round" stroke-linejoin="round"/></svg>',
   download: '<svg viewBox="0 0 24 24"><path d="M12 4v11m0 0-4-4m4 4 4-4"/><path d="M5 17v2a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-2"/></svg>',
   upload: '<svg viewBox="0 0 24 24"><path d="M12 20V9m0 0-4 4m4-4 4 4"/><path d="M5 17v2a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-2"/></svg>',
   copy: '<svg viewBox="0 0 24 24"><rect x="8" y="8" width="12" height="12" rx="2"/><path d="M5 15.5A1.5 1.5 0 0 1 3.5 14V5.5A1.5 1.5 0 0 1 5 4h8.5A1.5 1.5 0 0 1 15 5.5"/></svg>',
@@ -393,9 +408,9 @@ function renderHome(){
   const headBtns = document.createElement('div');
   headBtns.style.cssText = 'display:flex;gap:8px;';
   const backupBtn = document.createElement('button');
-  backupBtn.className = 'icon-btn';
+  backupBtn.className = 'icon-btn icon-btn-accent';
   backupBtn.setAttribute('aria-label', 'Backup and restore');
-  backupBtn.innerHTML = icon('gear');
+  backupBtn.innerHTML = icon('ticketShield');
   backupBtn.onclick = openBackupSheet;
   headBtns.appendChild(backupBtn);
   if(upcoming.length){
@@ -408,6 +423,22 @@ function renderHome(){
   }
   head.appendChild(headBtns);
   wrap.appendChild(head);
+
+  const hasAnyEvents = EVENTS.some(e=>!e._trashed);
+  const dsb = daysSinceBackup();
+  if(hasAnyEvents && (dsb === null || dsb >= 14)){
+    const banner = document.createElement('div');
+    banner.className = 'backup-banner';
+    banner.innerHTML = `
+      <div class="backup-banner-text">
+        <b>${dsb===null ? 'No backup yet' : 'Backup is getting old'}</b>
+        <span>${dsb===null ? 'iOS can clear site data without warning' : `Last one was ${dsb} days ago`}</span>
+      </div>
+      <span class="backup-banner-cta">Back up</span>
+    `;
+    banner.onclick = openBackupSheet;
+    wrap.appendChild(banner);
+  }
 
   if(!upcoming.length){
     wrap.appendChild(emptyState(

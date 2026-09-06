@@ -12,21 +12,36 @@ data is stored in the browser's `localStorage`, on-device only.
 All events live in this browser's `localStorage`, tied to the exact URL
 (origin) the app is served from. A code update to the **same URL** never
 touches that data — but if you redeploy to a **different URL** (a fresh
-Netlify Drop gives you a new random subdomain every time; a renamed
-GitHub repo changes the Pages URL), that's a different origin as far as
-the browser is concerned, so it starts with empty storage. This is almost
-certainly what happened if events vanished after an update — always
-redeploy over the same URL your home-screen icon points at.
+Netlify Drop gives you a new random subdomain every time; on Cloudflare
+Pages, every deployment gets its own unique `*.pages.dev` alias in
+addition to your stable production URL), that's a different origin as
+far as the browser is concerned, so it starts with empty storage. Always
+open and install from your stable production URL, not a per-deployment
+preview link.
 
-Two safety nets are built in either way:
+**Specific to adding this to your iPhone home screen:** Apple documents
+that a home-screen web app's storage is genuinely separate from Safari's
+own tab storage for the same site — and separately, iOS can clear a
+site's `localStorage` on its own under storage pressure or after a period
+of disuse, regardless of what the app's code does. Neither of these is
+something a website can fully opt out of. Two things mitigate it:
 
+- The app now checks for and installs code updates automatically —
+  every time you open it, or bring it back to the foreground — and
+  reloads itself once a new version is ready (unless you're mid-way
+  through adding or editing an event, in which case it waits until
+  you're done). You should never need to remove and re-add the home
+  screen icon just to pick up new code; doing that anyway risks landing
+  you in a fresh storage container.
 - The app asks the browser for **persistent storage** on load
-  (`navigator.storage.persist()`), which lowers the odds Safari clears
-  site data on its own under low-disk conditions. It's a request, not a
-  guarantee.
-- A **Backup & restore** panel — the gear icon on the Home screen — lets
-  you download or copy a JSON snapshot of everything, and restore from
-  one. Worth doing before you redeploy, switch phones, or reinstall.
+  (`navigator.storage.persist()`), which lowers the odds of an automatic
+  clear. It's a request, not a guarantee.
+
+Because of that, **Backup & restore** (the gear icon on Home) is the real
+safety net, not a nice-to-have — download or copy a JSON snapshot of
+everything, and restore from one just as easily. The app tracks when you
+last backed up and shows a small banner on Home nudging you to do it
+again after two weeks.
 
 ## Files
 
