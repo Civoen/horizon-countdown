@@ -1,9 +1,6 @@
-const CACHE = 'horizon-v2';
-const ASSETS = [
-  './index.html',
-  './styles.css',
-  './app.js',
-  './manifest.json',
+const CACHE = 'horizon-v3';
+const SHELL_FILES = ['index.html', 'styles.css', 'app.js', 'manifest.json'];
+const STATIC_ASSETS = [
   './icons/icon-192.png',
   './icons/icon-512.png',
   './icons/apple-touch-icon.png',
@@ -26,7 +23,7 @@ async function fetchClean(request) {
 self.addEventListener('install', (e) => {
   e.waitUntil(
     caches.open(CACHE).then(async (cache) => {
-      await Promise.all(ASSETS.map(async (url) => {
+      await Promise.all([...SHELL_FILES.map(f => './' + f), ...STATIC_ASSETS].map(async (url) => {
         try {
           const res = await fetchClean(url);
           await cache.put(url, res);
@@ -44,18 +41,37 @@ self.addEventListener('activate', (e) => {
   );
 });
 
-// Navigations always resolve to the cached app shell (index.html), so a
-// deep-linked reload (e.g. #/event/xyz) still works offline.
+function isShellRequest(request) {
+  if (request.mode === 'navigate') return true;
+  const path = new URL(request.url).pathname;
+  return SHELL_FILES.some((f) => path === '/' + f || path.endsWith('/' + f));
+}
+
 self.addEventListener('fetch', (e) => {
   if (e.request.method !== 'GET') return;
 
-  if (e.request.mode === 'navigate') {
+  // App shell (index.html, app.js, styles.css, manifest.json): always go to
+  // the network first so a redeploy is visible on the very next load — no
+  // dependency on this file's own cache-version string ever being bumped.
+  // Falls back to the last cached copy only when there's no connection.
+  if (isShellRequest(e.request)) {
+    const cacheKey = e.request.mode === 'navigate' ? './index.html' : e.request;
     e.respondWith(
-      caches.match('./index.html').then((cached) => cached || fetchClean(e.request).catch(() => cached))
+      fetchClean(e.request.mode === 'navigate' ? './index.html' : e.request)
+        .then((res) => {
+          if (res.ok) {
+            const clone = res.clone();
+            caches.open(CACHE).then((cache) => cache.put(cacheKey, clone));
+          }
+          return res;
+        })
+        .catch(() => caches.match(cacheKey))
     );
     return;
   }
 
+  // Everything else (icons, fonts): cache-first, since these essentially
+  // never change and there's no benefit to re-fetching them every load.
   e.respondWith(
     caches.match(e.request).then((cached) => {
       if (cached) return cached;
