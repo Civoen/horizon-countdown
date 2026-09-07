@@ -37,9 +37,10 @@ something a website can fully opt out of. Two things mitigate it:
   (`navigator.storage.persist()`), which lowers the odds of an automatic
   clear. It's a request, not a guarantee.
 
-Because of that, **Backup & restore** — under Settings on Home (the sliders
-icon) — is there as a safety net: share a JSON snapshot of everything to
-Files, AirDrop, or Messages, and restore from one just as easily.
+There's no in-app backup/export feature at the moment — the plan is to
+rely on standard iCloud device backup once this ships as a native app
+(see "Path to the App Store" below), rather than maintain a parallel
+manual-backup flow in the web version.
 
 ## Files
 
@@ -114,9 +115,9 @@ undo, share event / share preparation (native share sheet on iOS,
 clipboard fallback elsewhere), and empty states.
 
 A dedicated **Settings** page (the sliders icon on Home) holds: Home
-view (Full/Compact), a light/dark/system theme switch, five accent
-colors, new-event defaults (12h/24h time display, auto-archive on by
-default), Backup & Restore, and a "clear all events" reset.
+view (Full/Compact), a light/dark theme switch, five accent colors,
+new-event defaults (12h/24h time display, auto-archive on by default),
+and a "clear all events" reset.
 
 One known gap: the Time field on Add/Edit always accepts entry in 24-hour
 format regardless of your 12h/24h display preference — that preference

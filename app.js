@@ -314,86 +314,6 @@ function requestPersistentStorage(){
   }
 }
 
-/* ---------------- backup / restore ---------------- */
-const LAST_BACKUP_KEY = 'horizon_last_backup_v1';
-function markBackedUp(){ localStorage.setItem(LAST_BACKUP_KEY, new Date().toISOString()); }
-function daysSinceBackup(){
-  const raw = localStorage.getItem(LAST_BACKUP_KEY);
-  if(!raw) return null;
-  return daysBetween(new Date(raw), new Date());
-}
-
-function exportPayload(){
-  return JSON.stringify({ app:'Horizon', version:1, exportedAt: new Date().toISOString(), events: EVENTS }, null, 2);
-}
-async function shareBackupFile(){
-  const text = exportPayload();
-  const filename = `horizon-backup-${todayStr()}.json`;
-
-  // Web Share API with a file attachment — opens the native iOS share
-  // sheet (Save to Files, AirDrop, Messages, Mail, etc.) instead of
-  // forcing a browser download, which is awkward to locate afterward on
-  // a phone. Falls back to a plain download if the browser can't share
-  // files (e.g. most desktop browsers).
-  if(navigator.canShare && navigator.share){
-    try{
-      const file = new File([text], filename, { type:'application/json' });
-      if(navigator.canShare({ files:[file] })){
-        await navigator.share({ files:[file], title:'Horizon backup' });
-        markBackedUp();
-        return;
-      }
-    }catch(e){
-      if(e.name === 'AbortError') return; // person cancelled the share sheet — not an error
-    }
-  }
-  downloadBackup();
-}
-function downloadBackup(){
-  const blob = new Blob([exportPayload()], { type:'application/json' });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement('a');
-  a.href = url;
-  a.download = `horizon-backup-${todayStr()}.json`;
-  document.body.appendChild(a);
-  a.click();
-  a.remove();
-  setTimeout(()=> URL.revokeObjectURL(url), 2000);
-  markBackedUp();
-}
-function copyBackup(){
-  if(navigator.clipboard){
-    navigator.clipboard.writeText(exportPayload()).then(()=> { showToast('Backup copied to clipboard'); markBackedUp(); });
-  } else {
-    showToast('Clipboard isn\u2019t available here');
-  }
-}
-function importFromText(text){
-  let parsed;
-  try{ parsed = JSON.parse(text); }
-  catch(e){ showToast('That doesn\u2019t look like a valid backup file'); return; }
-  const incoming = Array.isArray(parsed) ? parsed : parsed.events;
-  if(!Array.isArray(incoming)){ showToast('No events found in that file'); return; }
-  confirmSheet(
-    'Restore this backup?',
-    `This will add ${incoming.length} event${incoming.length===1?'':'s'} from the backup. Events already on this device won\u2019t be duplicated or removed.`,
-    'Restore',
-    ()=>{
-      const existingIds = new Set(EVENTS.map(e=>e.id));
-      let added = 0;
-      incoming.forEach(ev=>{
-        if(ev && ev.id && !existingIds.has(ev.id)){
-          EVENTS.push(ev); existingIds.add(ev.id); added++;
-        }
-      });
-      saveEvents(EVENTS);
-      markBackedUp();
-      showToast(`Restored ${added} event${added===1?'':'s'}`);
-      render();
-    }
-  );
-}
-
 
 function renderSettings(){
   const wrap = document.createElement('div');
@@ -402,6 +322,28 @@ function renderSettings(){
   const sectionTitle = (t)=>{
     const el = document.createElement('div'); el.className='section-title'; el.textContent=t;
     return el;
+  };
+
+  // Builds a row of mutually-exclusive chips that update their own
+  // selected state in place on click, rather than forcing the whole
+  // Settings page to rebuild (which would replay its entrance animation
+  // on every tap).
+  const chipToggleRow = (options, getValue, onPick)=>{
+    const row = document.createElement('div'); row.className='chip-group';
+    const chips = options.map(opt=>{
+      const c = document.createElement('button'); c.type='button';
+      c.className = 'chip' + (getValue()===opt.v ? ' is-selected' : '');
+      c.textContent = opt.label;
+      row.appendChild(c);
+      return c;
+    });
+    options.forEach((opt, i)=>{
+      chips[i].onclick = ()=>{
+        onPick(opt.v);
+        chips.forEach((c,j)=> c.classList.toggle('is-selected', options[j].v===getValue()));
+      };
+    });
+    return row;
   };
 
   const backRow = document.createElement('div');
@@ -413,15 +355,11 @@ function renderSettings(){
   // -- Home view --
   wrap.appendChild(sectionTitle('Home view'));
   const viewCard = document.createElement('div'); viewCard.className='detail-card';
-  const viewRow = document.createElement('div'); viewRow.className='chip-group';
-  [{ v:false, label:'Full' }, { v:true, label:'Compact' }].forEach(opt=>{
-    const c = document.createElement('button'); c.type='button';
-    c.className = 'chip' + (compactMode===opt.v ? ' is-selected' : '');
-    c.textContent = opt.label;
-    c.onclick = ()=>{ compactMode = opt.v; saveCompact(compactMode); wrap.replaceWith(renderSettings()); };
-    viewRow.appendChild(c);
-  });
-  viewCard.appendChild(viewRow);
+  viewCard.appendChild(chipToggleRow(
+    [{ v:false, label:'Full' }, { v:true, label:'Compact' }],
+    ()=> compactMode,
+    (v)=>{ compactMode = v; saveCompact(v); }
+  ));
   const viewHint = document.createElement('p');
   viewHint.style.cssText = 'font-size:12.5px;color:var(--text-faint);margin:12px 0 0;';
   viewHint.textContent = 'Compact drops date and location from Home cards so titles read bigger.';
@@ -431,16 +369,11 @@ function renderSettings(){
   // -- Theme --
   wrap.appendChild(sectionTitle('Theme'));
   const themeCard = document.createElement('div'); themeCard.className='detail-card';
-  const themeRow = document.createElement('div'); themeRow.className='chip-group';
-  const currentThemeMode = loadThemeMode();
-  [{ v:'system', label:'System' }, { v:'light', label:'Light' }, { v:'dark', label:'Dark' }].forEach(opt=>{
-    const c = document.createElement('button'); c.type='button';
-    c.className = 'chip' + (currentThemeMode===opt.v ? ' is-selected' : '');
-    c.textContent = opt.label;
-    c.onclick = ()=>{ saveThemeMode(opt.v); wrap.replaceWith(renderSettings()); };
-    themeRow.appendChild(c);
-  });
-  themeCard.appendChild(themeRow);
+  themeCard.appendChild(chipToggleRow(
+    [{ v:'system', label:'Dark' }, { v:'light', label:'Light' }],
+    ()=> loadThemeMode(),
+    (v)=> saveThemeMode(v)
+  ));
   wrap.appendChild(themeCard);
 
   // -- Accent color --
@@ -448,22 +381,30 @@ function renderSettings(){
   const colorCard = document.createElement('div'); colorCard.className='detail-card';
   const swatchRow = document.createElement('div');
   swatchRow.style.cssText = 'display:flex;gap:12px;';
-  const currentAccent = loadAccentTheme();
+  const swatchEls = [];
+  const refreshSwatches = ()=>{
+    const current = loadAccentTheme().toLowerCase();
+    ACCENT_THEMES.forEach((theme, i)=>{
+      const isSelected = theme.hex.toLowerCase() === current;
+      const sw = swatchEls[i];
+      sw.style.border = `2.5px solid ${isSelected ? 'var(--surface)' : 'transparent'}`;
+      sw.style.boxShadow = `0 0 0 2px ${isSelected ? theme.hex : 'transparent'}`;
+      sw.innerHTML = isSelected ? `<span class="swatch-check">${icon('check')}</span>` : '';
+    });
+  };
   ACCENT_THEMES.forEach(theme=>{
-    const isSelected = theme.hex.toLowerCase() === currentAccent.toLowerCase();
     const sw = document.createElement('button');
     sw.type = 'button';
     sw.setAttribute('aria-label', theme.name);
     sw.style.cssText = `
       width:40px; height:40px; border-radius:50%; background:${theme.hex}; cursor:pointer;
-      border:2.5px solid ${isSelected ? 'var(--surface)' : 'transparent'};
-      box-shadow: 0 0 0 2px ${isSelected ? theme.hex : 'transparent'};
       display:flex; align-items:center; justify-content:center; flex-shrink:0;
     `;
-    if(isSelected) sw.innerHTML = `<span class="swatch-check">${icon('check')}</span>`;
-    sw.onclick = ()=>{ saveAccentTheme(theme.hex); wrap.replaceWith(renderSettings()); };
+    sw.onclick = ()=>{ saveAccentTheme(theme.hex); refreshSwatches(); };
+    swatchEls.push(sw);
     swatchRow.appendChild(sw);
   });
+  refreshSwatches();
   colorCard.appendChild(swatchRow);
   wrap.appendChild(colorCard);
 
@@ -475,16 +416,12 @@ function renderSettings(){
   timeLabel.style.cssText = 'font-size:12.5px;font-weight:700;color:var(--text-muted);letter-spacing:.02em;margin-bottom:8px;';
   timeLabel.textContent = 'Time format';
   defaultsCard.appendChild(timeLabel);
-  const timeRow = document.createElement('div'); timeRow.className='chip-group';
+  const timeRow = chipToggleRow(
+    [{ v:'24h', label:'24-hour' }, { v:'12h', label:'12-hour' }],
+    ()=> loadTimeFormat(),
+    (v)=> saveTimeFormat(v)
+  );
   timeRow.style.marginBottom = '16px';
-  const currentTimeFormat = loadTimeFormat();
-  [{ v:'24h', label:'24-hour' }, { v:'12h', label:'12-hour' }].forEach(opt=>{
-    const c = document.createElement('button'); c.type='button';
-    c.className = 'chip' + (currentTimeFormat===opt.v ? ' is-selected' : '');
-    c.textContent = opt.label;
-    c.onclick = ()=>{ saveTimeFormat(opt.v); wrap.replaceWith(renderSettings()); };
-    timeRow.appendChild(c);
-  });
   defaultsCard.appendChild(timeRow);
 
   const archiveRow = document.createElement('div');
@@ -506,68 +443,17 @@ function renderSettings(){
   defaultsCard.appendChild(archiveRow);
   wrap.appendChild(defaultsCard);
 
-  // -- Backup & restore --
-  wrap.appendChild(sectionTitle('Backup & restore'));
-  const card = document.createElement('div'); card.className='detail-card';
-  card.innerHTML = `
-    <p style="font-size:13px;color:var(--text-muted);line-height:1.5;margin:0 0 14px;">
-      Your events live only on this device. Worth doing before switching
-      phones or reinstalling.
-    </p>
-  `;
-  const btnCol = document.createElement('div');
-  btnCol.style.cssText = 'display:flex;flex-direction:column;gap:10px;';
-  btnCol.innerHTML = `
-    <button class="btn btn-ghost btn-block" id="shareBtn">${icon('share')} Share backup</button>
-    <label class="btn btn-ghost btn-block" style="cursor:pointer;">
-      ${icon('upload')} Restore from file
-      <input type="file" accept="application/json" id="fileInput" style="display:none;">
-    </label>
-    <button class="btn btn-text" id="cpBtn" style="justify-content:center;">${icon('copy')} Or copy backup as text</button>
-  `;
-  card.appendChild(btnCol);
-  const dsb = daysSinceBackup();
-  const lastLine = document.createElement('p');
-  lastLine.style.cssText = 'font-size:11.5px;color:var(--text-faint);margin:14px 0 0;text-align:center;';
-  lastLine.textContent = dsb === null ? 'Never backed up' : dsb === 0 ? 'Last backed up today' : `Last backed up ${dsb} day${dsb===1?'':'s'} ago`;
-  card.appendChild(lastLine);
-  wrap.appendChild(card);
-
-  card.querySelector('#shareBtn').onclick = ()=> shareBackupFile().then(()=>{ wrap.replaceWith(renderSettings()); });
-  card.querySelector('#cpBtn').onclick = ()=> { copyBackup(); };
-  card.querySelector('#fileInput').onchange = (e)=>{
-    const file = e.target.files[0];
-    if(!file) return;
-    const reader = new FileReader();
-    reader.onload = ()=> importFromText(reader.result);
-    reader.readAsText(file);
-  };
-
-  // -- About / roadmap --
-  wrap.appendChild(sectionTitle('About your data'));
-  const aboutCard = document.createElement('div'); aboutCard.className='detail-card';
-  aboutCard.innerHTML = `
-    <p style="font-size:13px;color:var(--text-muted);line-height:1.6;margin:0;">
-      Right now this runs as a web app, so events are stored locally in
-      the browser on this device only. If this becomes a native App Store
-      app, its data will automatically be included whenever your iPhone
-      backs up to iCloud — standard for any installed app, no extra setup.
-      That's separate from live syncing the same events across multiple
-      devices at once, which would be a later addition if it's ever needed.
-    </p>
-  `;
-  wrap.appendChild(aboutCard);
-
   // -- Danger zone --
   const activeCount = EVENTS.filter(e=>!e._trashed).length;
   if(activeCount > 0){
-    const dz = document.createElement('div'); dz.className='danger-zone';
+    wrap.appendChild(sectionTitle('Data'));
+    const dz = document.createElement('div'); dz.className='danger-zone'; dz.style.marginTop = '0';
     const clearBtn = document.createElement('button');
     clearBtn.className = 'btn btn-danger btn-block';
     clearBtn.textContent = 'Clear all events';
     clearBtn.onclick = ()=> confirmSheet(
       'Clear all events?',
-      `This permanently deletes all ${activeCount} event${activeCount===1?'':'s'} — upcoming and archived. This can\u2019t be undone. Consider a backup first.`,
+      `This permanently deletes all ${activeCount} event${activeCount===1?'':'s'} — upcoming and archived. This can\u2019t be undone.`,
       'Delete everything',
       ()=>{
         EVENTS = [];
@@ -579,11 +465,6 @@ function renderSettings(){
     dz.appendChild(clearBtn);
     wrap.appendChild(dz);
   }
-
-  const more = document.createElement('p');
-  more.style.cssText = 'font-size:12px;color:var(--text-faint);text-align:center;margin-top:22px;';
-  more.textContent = 'More settings will show up here as they\u2019re added.';
-  wrap.appendChild(more);
 
   return wrap;
 }
@@ -633,11 +514,7 @@ const ICONS = {
   plus: '<svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>',
   rows: '<svg viewBox="0 0 24 24"><rect x="4" y="5" width="16" height="4.5" rx="1.3"/><rect x="4" y="14.5" width="16" height="4.5" rx="1.3"/></svg>',
   squares: '<svg viewBox="0 0 24 24"><rect x="4" y="4" width="7" height="7" rx="1.3"/><rect x="13" y="4" width="7" height="7" rx="1.3"/><rect x="4" y="13" width="7" height="7" rx="1.3"/><rect x="13" y="13" width="7" height="7" rx="1.3"/></svg>',
-  ticketShield: '<svg viewBox="0 0 24 24"><path d="M12 3.5 19 6.3v5.4c0 4.7-3 8.6-7 9.8-4-1.2-7-5.1-7-9.8V6.3l7-2.8Z"/><path d="M9 12.2l2.1 2.1L15.5 10" stroke-linecap="round" stroke-linejoin="round"/></svg>',
   sliders: '<svg viewBox="0 0 24 24"><line x1="4" y1="6" x2="20" y2="6" stroke-linecap="round"/><circle cx="9" cy="6" r="2.2"/><line x1="4" y1="12" x2="20" y2="12" stroke-linecap="round"/><circle cx="15" cy="12" r="2.2"/><line x1="4" y1="18" x2="20" y2="18" stroke-linecap="round"/><circle cx="11" cy="18" r="2.2"/></svg>',
-  download: '<svg viewBox="0 0 24 24"><path d="M12 4v11m0 0-4-4m4 4 4-4"/><path d="M5 17v2a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-2"/></svg>',
-  upload: '<svg viewBox="0 0 24 24"><path d="M12 20V9m0 0-4 4m4-4 4 4"/><path d="M5 17v2a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-2"/></svg>',
-  copy: '<svg viewBox="0 0 24 24"><rect x="8" y="8" width="12" height="12" rx="2"/><path d="M5 15.5A1.5 1.5 0 0 1 3.5 14V5.5A1.5 1.5 0 0 1 5 4h8.5A1.5 1.5 0 0 1 15 5.5"/></svg>',
 };
 function icon(name){ return ICONS[name] || ''; }
 
