@@ -37,11 +37,9 @@ something a website can fully opt out of. Two things mitigate it:
   (`navigator.storage.persist()`), which lowers the odds of an automatic
   clear. It's a request, not a guarantee.
 
-Because of that, **Backup & restore** (the gear icon on Home) is the real
-safety net, not a nice-to-have — download or copy a JSON snapshot of
-everything, and restore from one just as easily. The app tracks when you
-last backed up and shows a small banner on Home nudging you to do it
-again after two weeks.
+Because of that, **Backup & restore** — under Settings on Home (the sliders
+icon) — is there as a safety net: share a JSON snapshot of everything to
+Files, AirDrop, or Messages, and restore from one just as easily.
 
 ## Files
 
@@ -106,10 +104,22 @@ touching Xcode much.
 
 Home, Archive, Add/Edit event, event detail, multi-day events, live
 countdown states (DAYS / TOMORROW / TODAY / TONIGHT / HAPPENING NOW),
-going-with names with suggestions from people you've added before,
-ticket-purchased toggle, a single travel note, a before-you-go checklist
-with type-based starter presets, mark-as-completed, automatic archiving
-the day after an event ends, delete with confirmation, share event /
-share preparation (native share sheet on iOS, clipboard fallback
-elsewhere), a compact home-screen view, backup & restore, and empty
-states.
+going-with names with suggestions from people you've gone somewhere with
+in roughly the last six months, ticket-purchased toggle, a single travel
+note, a before-you-go checklist with type-based starter presets,
+mark-as-completed, automatic archiving the day after an event ends
+(re-checked on every navigation, so a past-dated event you just added
+lands straight in Archive), delete with confirmation and a five-second
+undo, share event / share preparation (native share sheet on iOS,
+clipboard fallback elsewhere), and empty states.
+
+A dedicated **Settings** page (the sliders icon on Home) holds: Home
+view (Full/Compact), a light/dark/system theme switch, five accent
+colors, new-event defaults (12h/24h time display, auto-archive on by
+default), Backup & Restore, and a "clear all events" reset.
+
+One known gap: the Time field on Add/Edit always accepts entry in 24-hour
+format regardless of your 12h/24h display preference — that preference
+only affects how times are *shown* elsewhere (cards, detail page,
+sharing). Worth fixing if 12-hour entry turns out to matter in practice.
+

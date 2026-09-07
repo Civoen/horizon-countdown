@@ -61,18 +61,97 @@ function uid(){ return Date.now().toString(36) + Math.random().toString(36).slic
 
 let EVENTS = loadEvents();
 
+/* ---------------- accent theme ---------------- */
+const ACCENT_THEMES = [
+  { id:'violet', name:'Violet', hex:'#7C5CFF' },
+  { id:'sky',    name:'Sky',    hex:'#4FA8FF' },
+  { id:'teal',   name:'Teal',   hex:'#2DD4BF' },
+  { id:'pink',   name:'Pink',   hex:'#FF5FA8' },
+  { id:'amber',  name:'Amber',  hex:'#FBBF24' },
+];
+const ACCENT_KEY = 'horizon_accent_v1';
+
+function hexToRgb(hex){
+  const h = hex.replace('#','');
+  return { r: parseInt(h.slice(0,2),16), g: parseInt(h.slice(2,4),16), b: parseInt(h.slice(4,6),16) };
+}
+function applyAccentTheme(hex){
+  const { r, g, b } = hexToRgb(hex);
+  const root = document.documentElement.style;
+  root.setProperty('--accent', hex);
+  root.setProperty('--accent-soft', `rgba(${r},${g},${b},0.16)`);
+  root.setProperty('--accent-border', `rgba(${r},${g},${b},0.3)`);
+  root.setProperty('--accent-glow', `rgba(${r},${g},${b},0.45)`);
+}
+function loadAccentTheme(){ return localStorage.getItem(ACCENT_KEY) || ACCENT_THEMES[0].hex; }
+function saveAccentTheme(hex){ localStorage.setItem(ACCENT_KEY, hex); applyAccentTheme(hex); }
+applyAccentTheme(loadAccentTheme()); // apply immediately on load, before first render, to avoid a flash of the default color
+
+/* ---------------- light / dark mode ---------------- */
+const THEME_MODE_KEY = 'horizon_theme_mode_v1'; // 'system' | 'light' | 'dark'
+function loadThemeMode(){ return localStorage.getItem(THEME_MODE_KEY) || 'system'; }
+function resolvedTheme(mode){
+  if(mode === 'system'){
+    return (window.matchMedia && window.matchMedia('(prefers-color-scheme: light)').matches) ? 'light' : 'dark';
+  }
+  return mode;
+}
+function applyThemeMode(mode){
+  const resolved = resolvedTheme(mode);
+  document.documentElement.setAttribute('data-theme', resolved);
+  const meta = document.querySelector && document.querySelector('meta[name="theme-color"]');
+  if(meta) meta.setAttribute('content', resolved === 'light' ? '#FAFAF8' : '#0B0C10');
+}
+function saveThemeMode(mode){ localStorage.setItem(THEME_MODE_KEY, mode); applyThemeMode(mode); }
+applyThemeMode(loadThemeMode());
+if(window.matchMedia){
+  window.matchMedia('(prefers-color-scheme: light)').addEventListener('change', ()=>{
+    if(loadThemeMode() === 'system') applyThemeMode('system');
+  });
+}
+
+/* ---------------- 12h / 24h time display ---------------- */
+const TIME_FORMAT_KEY = 'horizon_time_format_v1'; // '24h' | '12h'
+function loadTimeFormat(){ return localStorage.getItem(TIME_FORMAT_KEY) || '24h'; }
+function saveTimeFormat(v){ localStorage.setItem(TIME_FORMAT_KEY, v); }
+function formatTimeDisplay(t){
+  if(!t) return '';
+  if(loadTimeFormat() === '24h') return t;
+  let [h, m] = t.split(':').map(Number);
+  const ampm = h >= 12 ? 'PM' : 'AM';
+  h = h % 12; if(h === 0) h = 12;
+  return `${h}:${String(m).padStart(2,'0')} ${ampm}`;
+}
+
+/* ---------------- new-event defaults ---------------- */
+const DEFAULT_AUTOARCHIVE_KEY = 'horizon_default_autoarchive_v1';
+function loadDefaultAutoArchive(){ return localStorage.getItem(DEFAULT_AUTOARCHIVE_KEY) !== '0'; } // default true
+function saveDefaultAutoArchive(v){ localStorage.setItem(DEFAULT_AUTOARCHIVE_KEY, v ? '1' : '0'); }
+
+/* ---------------- archive filter memory ---------------- */
+const ARCHIVE_FILTER_KEY = 'horizon_archive_filter_v1';
+function loadArchiveFilter(){ return localStorage.getItem(ARCHIVE_FILTER_KEY) || 'All'; }
+function saveArchiveFilter(v){ localStorage.setItem(ARCHIVE_FILTER_KEY, v); }
+
 const COMPACT_KEY = 'horizon_compact_v1';
 function loadCompact(){ return localStorage.getItem(COMPACT_KEY) === '1'; }
 function saveCompact(v){ localStorage.setItem(COMPACT_KEY, v ? '1' : '0'); }
 let compactMode = loadCompact();
 
+// Suggestions only draw on people from events within roughly the last six
+// months (or upcoming) — someone you haven't gone anywhere with in a while
+// quietly fades out on its own, no manual management needed.
 function knownNames(){
+  const cutoff = toDateStr(new Date(Date.now() - 182*86400000));
   const tally = {};
-  EVENTS.forEach(ev => (ev.goingWith||[]).forEach(p=>{
-    const key = (p.name||'').trim();
-    if(!key) return;
-    tally[key] = (tally[key]||0) + 1;
-  }));
+  EVENTS.forEach(ev=>{
+    if(ev.startDate < cutoff) return;
+    (ev.goingWith||[]).forEach(p=>{
+      const key = (p.name||'').trim();
+      if(!key) return;
+      tally[key] = (tally[key]||0) + 1;
+    });
+  });
   return Object.keys(tally).sort((a,b)=> tally[b]-tally[a] || a.localeCompare(b));
 }
 
@@ -217,7 +296,6 @@ function currentRoute(){
 
 window.addEventListener('hashchange', render);
 window.addEventListener('DOMContentLoaded', ()=>{
-  runAutoArchive();
   render();
   requestPersistentStorage();
   document.getElementById('nav').addEventListener('click', (e)=>{
@@ -247,6 +325,29 @@ function daysSinceBackup(){
 
 function exportPayload(){
   return JSON.stringify({ app:'Horizon', version:1, exportedAt: new Date().toISOString(), events: EVENTS }, null, 2);
+}
+async function shareBackupFile(){
+  const text = exportPayload();
+  const filename = `horizon-backup-${todayStr()}.json`;
+
+  // Web Share API with a file attachment — opens the native iOS share
+  // sheet (Save to Files, AirDrop, Messages, Mail, etc.) instead of
+  // forcing a browser download, which is awkward to locate afterward on
+  // a phone. Falls back to a plain download if the browser can't share
+  // files (e.g. most desktop browsers).
+  if(navigator.canShare && navigator.share){
+    try{
+      const file = new File([text], filename, { type:'application/json' });
+      if(navigator.canShare({ files:[file] })){
+        await navigator.share({ files:[file], title:'Horizon backup' });
+        markBackedUp();
+        return;
+      }
+    }catch(e){
+      if(e.name === 'AbortError') return; // person cancelled the share sheet — not an error
+    }
+  }
+  downloadBackup();
 }
 function downloadBackup(){
   const blob = new Blob([exportPayload()], { type:'application/json' });
@@ -294,49 +395,202 @@ function importFromText(text){
 }
 
 
-function openBackupSheet(){
-  const overlay = document.createElement('div'); overlay.className='overlay';
-  overlay.innerHTML = `
-    <div class="sheet">
-      <div class="sheet-title" style="display:flex;align-items:center;gap:10px;">
-        <span class="sheet-icon-badge">${icon('ticketShield')}</span>
-        Backup &amp; restore
-      </div>
-      <div class="sheet-body">
-        Your events live only on this device. Save a backup before switching
-        phones, reinstalling, or if you're redeploying this app to a new
-        web address — a new URL starts with empty storage.
-      </div>
-      <div style="display:flex;flex-direction:column;gap:10px;">
-        <button class="btn btn-ghost btn-block" id="dlBtn">${icon('download')} Download backup file</button>
-        <button class="btn btn-ghost btn-block" id="cpBtn">${icon('copy')} Copy backup as text</button>
-        <label class="btn btn-ghost btn-block" style="cursor:pointer;">
-          ${icon('upload')} Restore from file
-          <input type="file" accept="application/json" id="fileInput" style="display:none;">
-        </label>
-      </div>
-      <div class="sheet-actions" style="margin-top:18px;">
-        <button class="btn btn-text" id="closeBtn" style="flex:1;">Close</button>
-      </div>
-    </div>`;
-  document.body.appendChild(overlay);
-  requestAnimationFrame(()=> overlay.classList.add('is-open'));
-  const close = ()=>{ overlay.classList.remove('is-open'); setTimeout(()=>overlay.remove(), 200); };
-  overlay.addEventListener('click', (e)=>{ if(e.target===overlay) close(); });
-  overlay.querySelector('#closeBtn').onclick = close;
-  overlay.querySelector('#dlBtn').onclick = downloadBackup;
-  overlay.querySelector('#cpBtn').onclick = copyBackup;
-  overlay.querySelector('#fileInput').onchange = (e)=>{
+function renderSettings(){
+  const wrap = document.createElement('div');
+  wrap.className = 'screen';
+
+  const sectionTitle = (t)=>{
+    const el = document.createElement('div'); el.className='section-title'; el.textContent=t;
+    return el;
+  };
+
+  const backRow = document.createElement('div');
+  backRow.className = 'back-row';
+  backRow.innerHTML = `<button class="back-btn">${icon('chevronLeft')}</button><div class="back-title">Settings</div>`;
+  backRow.querySelector('.back-btn').onclick = ()=> navigate('/home');
+  wrap.appendChild(backRow);
+
+  // -- Home view --
+  wrap.appendChild(sectionTitle('Home view'));
+  const viewCard = document.createElement('div'); viewCard.className='detail-card';
+  const viewRow = document.createElement('div'); viewRow.className='chip-group';
+  [{ v:false, label:'Full' }, { v:true, label:'Compact' }].forEach(opt=>{
+    const c = document.createElement('button'); c.type='button';
+    c.className = 'chip' + (compactMode===opt.v ? ' is-selected' : '');
+    c.textContent = opt.label;
+    c.onclick = ()=>{ compactMode = opt.v; saveCompact(compactMode); wrap.replaceWith(renderSettings()); };
+    viewRow.appendChild(c);
+  });
+  viewCard.appendChild(viewRow);
+  const viewHint = document.createElement('p');
+  viewHint.style.cssText = 'font-size:12.5px;color:var(--text-faint);margin:12px 0 0;';
+  viewHint.textContent = 'Compact drops date and location from Home cards so titles read bigger.';
+  viewCard.appendChild(viewHint);
+  wrap.appendChild(viewCard);
+
+  // -- Theme --
+  wrap.appendChild(sectionTitle('Theme'));
+  const themeCard = document.createElement('div'); themeCard.className='detail-card';
+  const themeRow = document.createElement('div'); themeRow.className='chip-group';
+  const currentThemeMode = loadThemeMode();
+  [{ v:'system', label:'System' }, { v:'light', label:'Light' }, { v:'dark', label:'Dark' }].forEach(opt=>{
+    const c = document.createElement('button'); c.type='button';
+    c.className = 'chip' + (currentThemeMode===opt.v ? ' is-selected' : '');
+    c.textContent = opt.label;
+    c.onclick = ()=>{ saveThemeMode(opt.v); wrap.replaceWith(renderSettings()); };
+    themeRow.appendChild(c);
+  });
+  themeCard.appendChild(themeRow);
+  wrap.appendChild(themeCard);
+
+  // -- Accent color --
+  wrap.appendChild(sectionTitle('Accent color'));
+  const colorCard = document.createElement('div'); colorCard.className='detail-card';
+  const swatchRow = document.createElement('div');
+  swatchRow.style.cssText = 'display:flex;gap:12px;';
+  const currentAccent = loadAccentTheme();
+  ACCENT_THEMES.forEach(theme=>{
+    const isSelected = theme.hex.toLowerCase() === currentAccent.toLowerCase();
+    const sw = document.createElement('button');
+    sw.type = 'button';
+    sw.setAttribute('aria-label', theme.name);
+    sw.style.cssText = `
+      width:40px; height:40px; border-radius:50%; background:${theme.hex}; cursor:pointer;
+      border:2.5px solid ${isSelected ? 'var(--surface)' : 'transparent'};
+      box-shadow: 0 0 0 2px ${isSelected ? theme.hex : 'transparent'};
+      display:flex; align-items:center; justify-content:center; flex-shrink:0;
+    `;
+    if(isSelected) sw.innerHTML = `<span class="swatch-check">${icon('check')}</span>`;
+    sw.onclick = ()=>{ saveAccentTheme(theme.hex); wrap.replaceWith(renderSettings()); };
+    swatchRow.appendChild(sw);
+  });
+  colorCard.appendChild(swatchRow);
+  wrap.appendChild(colorCard);
+
+  // -- New event defaults --
+  wrap.appendChild(sectionTitle('New event defaults'));
+  const defaultsCard = document.createElement('div'); defaultsCard.className='detail-card';
+
+  const timeLabel = document.createElement('div');
+  timeLabel.style.cssText = 'font-size:12.5px;font-weight:700;color:var(--text-muted);letter-spacing:.02em;margin-bottom:8px;';
+  timeLabel.textContent = 'Time format';
+  defaultsCard.appendChild(timeLabel);
+  const timeRow = document.createElement('div'); timeRow.className='chip-group';
+  timeRow.style.marginBottom = '16px';
+  const currentTimeFormat = loadTimeFormat();
+  [{ v:'24h', label:'24-hour' }, { v:'12h', label:'12-hour' }].forEach(opt=>{
+    const c = document.createElement('button'); c.type='button';
+    c.className = 'chip' + (currentTimeFormat===opt.v ? ' is-selected' : '');
+    c.textContent = opt.label;
+    c.onclick = ()=>{ saveTimeFormat(opt.v); wrap.replaceWith(renderSettings()); };
+    timeRow.appendChild(c);
+  });
+  defaultsCard.appendChild(timeRow);
+
+  const archiveRow = document.createElement('div');
+  archiveRow.style.cssText = 'display:flex;align-items:center;justify-content:space-between;padding-top:14px;border-top:1px solid var(--border);';
+  archiveRow.innerHTML = `
+    <div style="display:flex;flex-direction:column;gap:2px;">
+      <div style="font-size:14px;font-weight:600;">Auto-archive by default</div>
+      <div style="font-size:12px;color:var(--text-faint);">Applies to new events \u2014 editable per event</div>
+    </div>
+  `;
+  const archiveSwitch = document.createElement('div');
+  archiveSwitch.className = 'switch' + (loadDefaultAutoArchive() ? ' is-on' : '');
+  archiveSwitch.onclick = ()=>{
+    const v = !loadDefaultAutoArchive();
+    saveDefaultAutoArchive(v);
+    archiveSwitch.classList.toggle('is-on', v);
+  };
+  archiveRow.appendChild(archiveSwitch);
+  defaultsCard.appendChild(archiveRow);
+  wrap.appendChild(defaultsCard);
+
+  // -- Backup & restore --
+  wrap.appendChild(sectionTitle('Backup & restore'));
+  const card = document.createElement('div'); card.className='detail-card';
+  card.innerHTML = `
+    <p style="font-size:13px;color:var(--text-muted);line-height:1.5;margin:0 0 14px;">
+      Your events live only on this device. Worth doing before switching
+      phones or reinstalling.
+    </p>
+  `;
+  const btnCol = document.createElement('div');
+  btnCol.style.cssText = 'display:flex;flex-direction:column;gap:10px;';
+  btnCol.innerHTML = `
+    <button class="btn btn-ghost btn-block" id="shareBtn">${icon('share')} Share backup</button>
+    <label class="btn btn-ghost btn-block" style="cursor:pointer;">
+      ${icon('upload')} Restore from file
+      <input type="file" accept="application/json" id="fileInput" style="display:none;">
+    </label>
+    <button class="btn btn-text" id="cpBtn" style="justify-content:center;">${icon('copy')} Or copy backup as text</button>
+  `;
+  card.appendChild(btnCol);
+  const dsb = daysSinceBackup();
+  const lastLine = document.createElement('p');
+  lastLine.style.cssText = 'font-size:11.5px;color:var(--text-faint);margin:14px 0 0;text-align:center;';
+  lastLine.textContent = dsb === null ? 'Never backed up' : dsb === 0 ? 'Last backed up today' : `Last backed up ${dsb} day${dsb===1?'':'s'} ago`;
+  card.appendChild(lastLine);
+  wrap.appendChild(card);
+
+  card.querySelector('#shareBtn').onclick = ()=> shareBackupFile().then(()=>{ wrap.replaceWith(renderSettings()); });
+  card.querySelector('#cpBtn').onclick = ()=> { copyBackup(); };
+  card.querySelector('#fileInput').onchange = (e)=>{
     const file = e.target.files[0];
     if(!file) return;
     const reader = new FileReader();
-    reader.onload = ()=> { close(); importFromText(reader.result); };
+    reader.onload = ()=> importFromText(reader.result);
     reader.readAsText(file);
   };
+
+  // -- About / roadmap --
+  wrap.appendChild(sectionTitle('About your data'));
+  const aboutCard = document.createElement('div'); aboutCard.className='detail-card';
+  aboutCard.innerHTML = `
+    <p style="font-size:13px;color:var(--text-muted);line-height:1.6;margin:0;">
+      Right now this runs as a web app, so events are stored locally in
+      the browser on this device only. If this becomes a native App Store
+      app, its data will automatically be included whenever your iPhone
+      backs up to iCloud — standard for any installed app, no extra setup.
+      That's separate from live syncing the same events across multiple
+      devices at once, which would be a later addition if it's ever needed.
+    </p>
+  `;
+  wrap.appendChild(aboutCard);
+
+  // -- Danger zone --
+  const activeCount = EVENTS.filter(e=>!e._trashed).length;
+  if(activeCount > 0){
+    const dz = document.createElement('div'); dz.className='danger-zone';
+    const clearBtn = document.createElement('button');
+    clearBtn.className = 'btn btn-danger btn-block';
+    clearBtn.textContent = 'Clear all events';
+    clearBtn.onclick = ()=> confirmSheet(
+      'Clear all events?',
+      `This permanently deletes all ${activeCount} event${activeCount===1?'':'s'} — upcoming and archived. This can\u2019t be undone. Consider a backup first.`,
+      'Delete everything',
+      ()=>{
+        EVENTS = [];
+        saveEvents(EVENTS);
+        showToast('All events cleared');
+        navigate('/home');
+      }
+    );
+    dz.appendChild(clearBtn);
+    wrap.appendChild(dz);
+  }
+
+  const more = document.createElement('p');
+  more.style.cssText = 'font-size:12px;color:var(--text-faint);text-align:center;margin-top:22px;';
+  more.textContent = 'More settings will show up here as they\u2019re added.';
+  wrap.appendChild(more);
+
+  return wrap;
 }
 
 /* ---------------- render dispatch ---------------- */
 function render(){
+  runAutoArchive();
   const { name, id } = currentRoute();
   const app = document.getElementById('app');
   app.innerHTML = '';
@@ -349,6 +603,7 @@ function render(){
   else if(name === 'add') app.appendChild(renderForm(null));
   else if(name === 'edit') app.appendChild(renderForm(EVENTS.find(e=>e.id===id) || null));
   else if(name === 'event') app.appendChild(renderDetail(id));
+  else if(name === 'settings') app.appendChild(renderSettings());
   else app.appendChild(renderHome());
 
   window.scrollTo(0,0);
@@ -378,8 +633,8 @@ const ICONS = {
   plus: '<svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>',
   rows: '<svg viewBox="0 0 24 24"><rect x="4" y="5" width="16" height="4.5" rx="1.3"/><rect x="4" y="14.5" width="16" height="4.5" rx="1.3"/></svg>',
   squares: '<svg viewBox="0 0 24 24"><rect x="4" y="4" width="7" height="7" rx="1.3"/><rect x="13" y="4" width="7" height="7" rx="1.3"/><rect x="4" y="13" width="7" height="7" rx="1.3"/><rect x="13" y="13" width="7" height="7" rx="1.3"/></svg>',
-  gear: '<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 13.5a1.7 1.7 0 0 0 .34 1.87l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.7 1.7 0 0 0-1.87-.34 1.7 1.7 0 0 0-1.04 1.56V19.5a2 2 0 1 1-4 0v-.09a1.7 1.7 0 0 0-1.04-1.56 1.7 1.7 0 0 0-1.87.34l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.7 1.7 0 0 0 .34-1.87 1.7 1.7 0 0 0-1.56-1.04H4.5a2 2 0 1 1 0-4h.09a1.7 1.7 0 0 0 1.56-1.04 1.7 1.7 0 0 0-.34-1.87l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.7 1.7 0 0 0 1.87.34H10a1.7 1.7 0 0 0 1.04-1.56V4.5a2 2 0 1 1 4 0v.09a1.7 1.7 0 0 0 1.04 1.56 1.7 1.7 0 0 0 1.87-.34l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.7 1.7 0 0 0-.34 1.87V10a1.7 1.7 0 0 0 1.56 1.04h.09a2 2 0 1 1 0 4h-.09a1.7 1.7 0 0 0-1.56 1.04Z"/></svg>',
   ticketShield: '<svg viewBox="0 0 24 24"><path d="M12 3.5 19 6.3v5.4c0 4.7-3 8.6-7 9.8-4-1.2-7-5.1-7-9.8V6.3l7-2.8Z"/><path d="M9 12.2l2.1 2.1L15.5 10" stroke-linecap="round" stroke-linejoin="round"/></svg>',
+  sliders: '<svg viewBox="0 0 24 24"><line x1="4" y1="6" x2="20" y2="6" stroke-linecap="round"/><circle cx="9" cy="6" r="2.2"/><line x1="4" y1="12" x2="20" y2="12" stroke-linecap="round"/><circle cx="15" cy="12" r="2.2"/><line x1="4" y1="18" x2="20" y2="18" stroke-linecap="round"/><circle cx="11" cy="18" r="2.2"/></svg>',
   download: '<svg viewBox="0 0 24 24"><path d="M12 4v11m0 0-4-4m4 4 4-4"/><path d="M5 17v2a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-2"/></svg>',
   upload: '<svg viewBox="0 0 24 24"><path d="M12 20V9m0 0-4 4m4-4 4 4"/><path d="M5 17v2a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-2"/></svg>',
   copy: '<svg viewBox="0 0 24 24"><rect x="8" y="8" width="12" height="12" rx="2"/><path d="M5 15.5A1.5 1.5 0 0 1 3.5 14V5.5A1.5 1.5 0 0 1 5 4h8.5A1.5 1.5 0 0 1 15 5.5"/></svg>',
@@ -407,12 +662,6 @@ function renderHome(){
   `;
   const headBtns = document.createElement('div');
   headBtns.style.cssText = 'display:flex;gap:8px;';
-  const backupBtn = document.createElement('button');
-  backupBtn.className = 'icon-btn icon-btn-accent';
-  backupBtn.setAttribute('aria-label', 'Backup and restore');
-  backupBtn.innerHTML = icon('ticketShield');
-  backupBtn.onclick = openBackupSheet;
-  headBtns.appendChild(backupBtn);
   if(upcoming.length){
     const toggle = document.createElement('button');
     toggle.className = 'icon-btn';
@@ -421,24 +670,14 @@ function renderHome(){
     toggle.onclick = ()=>{ compactMode = !compactMode; saveCompact(compactMode); render(); };
     headBtns.appendChild(toggle);
   }
+  const settingsBtn = document.createElement('button');
+  settingsBtn.className = 'icon-btn';
+  settingsBtn.setAttribute('aria-label', 'Settings');
+  settingsBtn.innerHTML = icon('sliders');
+  settingsBtn.onclick = ()=> navigate('/settings');
+  headBtns.appendChild(settingsBtn);
   head.appendChild(headBtns);
   wrap.appendChild(head);
-
-  const hasAnyEvents = EVENTS.some(e=>!e._trashed);
-  const dsb = daysSinceBackup();
-  if(hasAnyEvents && (dsb === null || dsb >= 14)){
-    const banner = document.createElement('div');
-    banner.className = 'backup-banner';
-    banner.innerHTML = `
-      <div class="backup-banner-text">
-        <b>${dsb===null ? 'No backup yet' : 'Backup is getting old'}</b>
-        <span>${dsb===null ? 'iOS can clear site data without warning' : `Last one was ${dsb} days ago`}</span>
-      </div>
-      <span class="backup-banner-cta">Back up</span>
-    `;
-    banner.onclick = openBackupSheet;
-    wrap.appendChild(banner);
-  }
 
   if(!upcoming.length){
     wrap.appendChild(emptyState(
@@ -454,97 +693,6 @@ function renderHome(){
   upcoming.forEach(ev => list.appendChild(compactMode ? ticketCompactRow(ev) : ticketCard(ev)));
   wrap.appendChild(list);
   return wrap;
-}
-
-/* ---------------- swipe-to-archive / swipe-to-delete ---------------- */
-const SWIPE_REVEAL = 84;
-const SWIPE_TRIGGER = 46;
-
-function attachSwipe(fg, onOpenChange){
-  let startX=0, startY=0, dx=0, decided=null, dragging=false, open=0, moved=false;
-
-  fg.addEventListener('touchstart', (e)=>{
-    const t = e.touches[0];
-    startX = t.clientX; startY = t.clientY; dx = open===-1?-SWIPE_REVEAL:open===1?SWIPE_REVEAL:0;
-    dragging = true; decided = null; moved = false;
-    fg.classList.add('is-dragging'); fg.classList.remove('is-snapping');
-  }, {passive:true});
-
-  fg.addEventListener('touchmove', (e)=>{
-    if(!dragging) return;
-    const t = e.touches[0];
-    const rawDx = t.clientX - startX + (open===-1?-SWIPE_REVEAL:open===1?SWIPE_REVEAL:0);
-    const rawDy = t.clientY - startY;
-    if(decided===null){
-      if(Math.abs(t.clientX-startX) > 8 || Math.abs(rawDy) > 8){
-        decided = Math.abs(t.clientX-startX) > Math.abs(rawDy) ? 'h' : 'v';
-      }
-    }
-    if(decided !== 'h') return;
-    e.preventDefault();
-    moved = true;
-    const max = SWIPE_REVEAL + 24;
-    dx = Math.max(-max, Math.min(max, rawDx));
-    fg.style.transform = `translateX(${dx}px)`;
-  }, {passive:false});
-
-  const finish = ()=>{
-    dragging = false;
-    fg.classList.remove('is-dragging'); fg.classList.add('is-snapping');
-    if(decided === 'h'){
-      if(dx <= -SWIPE_TRIGGER){ open=-1; } else if(dx >= SWIPE_TRIGGER){ open=1; } else { open=0; }
-    }
-    fg.style.transform = open===-1?`translateX(-${SWIPE_REVEAL}px)`:open===1?`translateX(${SWIPE_REVEAL}px)`:'translateX(0)';
-    if(onOpenChange) onOpenChange(open);
-  };
-  fg.addEventListener('touchend', finish);
-  fg.addEventListener('touchcancel', finish);
-
-  return {
-    close(){ open=0; fg.classList.add('is-snapping'); fg.style.transform='translateX(0)'; },
-    wasDragged(){ return moved; },
-  };
-}
-
-function wrapWithSwipe(fg, { compact, onArchive, onDelete }){
-  const wrap = document.createElement('div');
-  wrap.className = 'swipe-wrap' + (compact ? ' is-compact' : '');
-
-  const archiveBtn = document.createElement('button');
-  archiveBtn.className = 'swipe-action swipe-action-archive';
-  archiveBtn.innerHTML = `${icon('check')}<span>Archive</span>`;
-
-  const deleteBtn = document.createElement('button');
-  deleteBtn.className = 'swipe-action swipe-action-delete';
-  deleteBtn.innerHTML = `${icon('trash')}<span>Delete</span>`;
-
-  fg.classList.add('swipe-fg');
-  wrap.appendChild(archiveBtn);
-  wrap.appendChild(deleteBtn);
-  wrap.appendChild(fg);
-
-  const ctrl = attachSwipe(fg);
-  archiveBtn.onclick = ()=>{ haptic(12); ctrl.close(); onArchive(); };
-  deleteBtn.onclick = ()=>{ haptic(12); ctrl.close(); onDelete(); };
-
-  // Suppress the tap-to-navigate click that follows a real drag.
-  const originalOnClick = fg.onclick;
-  fg.onclick = (e)=>{
-    if(ctrl.wasDragged()){ e.preventDefault(); e.stopPropagation(); return; }
-    if(originalOnClick) originalOnClick(e);
-  };
-
-  return wrap;
-}
-
-function quickArchiveEvent(ev){
-  ev.completed = true; ev.completedAt = todayStr();
-  saveEvents(EVENTS);
-  render();
-  showToast('Archived', { actionLabel:'Undo', onAction:()=>{
-    ev.completed = false; ev.completedAt = null;
-    saveEvents(EVENTS); render();
-  }});
 }
 
 function softDeleteEvent(ev, afterNavigate){
@@ -593,15 +741,7 @@ function ticketCompactRow(ev){
     ${ev.ticketPurchased ? `<span class="pill pill-success pill-sm">${icon('ticket')}</span>` : ''}
   `;
   row.appendChild(foot);
-  return wrapWithSwipe(row, {
-    compact: true,
-    onArchive: ()=> quickArchiveEvent(ev),
-    onDelete: ()=> confirmSheet(
-      'Delete this event?',
-      'This can\u2019t be undone. All preparation details will be lost.',
-      'Delete', ()=> softDeleteEvent(ev)
-    ),
-  });
+  return row;
 }
 
 function emptyState(title, sub, cta, onClick){
@@ -629,7 +769,7 @@ function ticketCard(ev){
     <div class="ticket-type">${TYPE_ICON[ev.type]||''} ${ev.type}</div>
     <div class="ticket-title">${escapeHtml(ev.title)}</div>
     <div class="ticket-meta">
-      <div class="ticket-meta-row">${icon('calendar')} ${formatEventDate(ev)}${ev.time?` · ${ev.time}`:''}</div>
+      <div class="ticket-meta-row">${icon('calendar')} ${formatEventDate(ev)}${ev.time?` · ${formatTimeDisplay(ev.time)}`:''}</div>
       ${ev.location ? `<div class="ticket-meta-row">${icon('pin')} ${escapeHtml(ev.location)}</div>` : ''}
       ${ev.goingWith && ev.goingWith.filter(p=>p.coming!==false).length ? `<div class="ticket-meta-row ticket-people">${icon('people')} ${ev.goingWith.filter(p=>p.coming!==false).map(p=>escapeHtml(p.name)).join(' · ')}</div>` : ''}
     </div>`;
@@ -650,15 +790,7 @@ function ticketCard(ev){
     ${ev.ticketPurchased ? `<span class="pill pill-success">${icon('ticket')} Purchased</span>` : ''}
   `;
   card.appendChild(foot);
-  return wrapWithSwipe(card, {
-    compact: false,
-    onArchive: ()=> quickArchiveEvent(ev),
-    onDelete: ()=> confirmSheet(
-      'Delete this event?',
-      'This can\u2019t be undone. All preparation details will be lost.',
-      'Delete', ()=> softDeleteEvent(ev)
-    ),
-  });
+  return card;
 }
 
 function escapeHtml(s){
@@ -668,7 +800,7 @@ function escapeHtml(s){
 /* ============================================================
    ARCHIVE
    ============================================================ */
-let archiveFilter = 'All';
+let archiveFilter = loadArchiveFilter();
 function renderArchive(){
   const wrap = document.createElement('div');
   wrap.className = 'screen';
@@ -689,13 +821,14 @@ function renderArchive(){
   }
 
   const filters = ['All', ...TYPES.filter(t=>all.some(e=>e.type===t))];
+  if(!filters.includes(archiveFilter)){ archiveFilter = 'All'; saveArchiveFilter('All'); }
   const filterRow = document.createElement('div');
   filterRow.className = 'filter-row';
   filters.forEach(f=>{
     const chip = document.createElement('button');
     chip.className = 'chip' + (archiveFilter===f ? ' is-selected':'');
     chip.textContent = f;
-    chip.onclick = ()=>{ archiveFilter = f; render(); };
+    chip.onclick = ()=>{ archiveFilter = f; saveArchiveFilter(f); render(); };
     filterRow.appendChild(chip);
   });
   wrap.appendChild(filterRow);
@@ -728,7 +861,7 @@ function blankEvent(){
     location:'', goingWith:[], ticketPurchased:false,
     travel:{method:'', details:''},
     prepTasks:[],
-    autoArchive:true, completed:false, completedAt:null,
+    autoArchive: loadDefaultAutoArchive(), completed:false, completedAt:null,
     createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(),
   };
 }
@@ -868,8 +1001,8 @@ function renderForm(existing, liveDraft, liveMultiDay, livePresetsTouched, liveI
       const tags = document.createElement('div'); tags.className='name-tags';
       draft.goingWith.forEach((person, idx)=>{
         const t = document.createElement('span'); t.className='name-tag';
-        t.innerHTML = `${escapeHtml(person.name)} <button type="button">${icon('x')}</button>`;
-        t.querySelector('button').onclick = ()=>{ draft.goingWith.splice(idx,1); renderInto(); };
+        t.innerHTML = `${escapeHtml(person.name)}<span class="name-tag-x">×</span>`;
+        t.onclick = ()=>{ draft.goingWith.splice(idx,1); renderInto(); };
         tags.appendChild(t);
       });
       box.appendChild(tags);
@@ -1061,7 +1194,7 @@ function renderDetail(id){
     <div class="detail-type">${TYPE_ICON[ev.type]||''} ${ev.type}</div>
     <div class="detail-title">${escapeHtml(ev.title)}</div>
     <div class="detail-meta">
-      <div class="detail-meta-row">${icon('calendar')} ${formatEventDate(ev)}${ev.time?` · ${ev.time}`:''}</div>
+      <div class="detail-meta-row">${icon('calendar')} ${formatEventDate(ev)}${ev.time?` · ${formatTimeDisplay(ev.time)}`:''}</div>
       ${ev.location?`<div class="detail-meta-row">${icon('pin')} ${escapeHtml(ev.location)}</div>`:''}
     </div>
   `;
@@ -1169,7 +1302,7 @@ function chipChecklist(items){
 
 /* ---------------- share ---------------- */
 function shareEvent(ev, includePrep){
-  let text = `${ev.title.toUpperCase()}\n${formatEventDate(ev)}${ev.time?` · ${ev.time}`:''}\n`;
+  let text = `${ev.title.toUpperCase()}\n${formatEventDate(ev)}${ev.time?` · ${formatTimeDisplay(ev.time)}`:''}\n`;
   if(ev.location) text += `📍 ${ev.location}\n`;
   const coming = (ev.goingWith||[]).filter(p=>p.coming!==false).map(p=>p.name);
   if(coming.length) text += `👥 ${coming.join(' · ')}\n`;
