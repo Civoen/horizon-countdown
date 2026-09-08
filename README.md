@@ -125,26 +125,32 @@ to installed native apps.
 
 Home, Archive, Add/Edit event, event detail, multi-day events, live
 countdown states (DAYS / TOMORROW / TODAY / TONIGHT / HAPPENING NOW), a
-custom-built calendar for picking dates (the native iOS date picker can't
-be restyled at all, so this replaces it entirely rather than trying to
-reskin it), going-with names with suggestions from people you've gone
-somewhere with in roughly the last six months, location suggestions from
-your own past events of the same type within that same window (not a
-real-world venue lookup, see below), ticket-purchased toggle, a single
+custom-built calendar for picking dates and a matching scroll-wheel time
+picker (the native iOS date/time pickers can't be restyled at all, so
+these replace them entirely rather than trying to reskin them; the time
+wheel respects your 12h/24h Settings preference and includes a "No time"
+option since Time is optional), going-with names with suggestions from
+people you've gone somewhere with in roughly the last six months,
+location suggestions from your own past events of the same type within
+that same window (not a real-world venue lookup, see below),
+ticket-purchased toggle, a single
 travel note, a before-you-go checklist with type-based starter presets,
 mark-as-completed, automatic archiving the day after an event ends
 (re-checked on every navigation, so a past-dated event you just added
 lands straight in Archive), delete with confirmation and a five-second
 undo, share event / share preparation (native share sheet on iOS,
 clipboard fallback elsewhere), duplicating an event (same details, fresh
-date to fill in, from the detail page's action row), and empty states.
+date to fill in, from the detail page's action row), search on Home
+(matches title and location, next to the compact-view toggle), and empty
+states.
 
 A dedicated **Settings** page (the sliders icon on Home) holds: Home
 view (Full/Compact), a light/dark theme switch that cross-fades instead
 of jumping, five accent colors, time format (12h/24h), new-event defaults
 (default type, auto-archive on by default), a haptics on/off switch
-(inert on iOS Safari today, see below), About, a changelog, and a
-"clear all events" reset.
+(inert on iOS Safari today, see below), an About section (with the
+current version number, bump `APP_VERSION` at the top of `app.js` on
+release), and a "clear all events" reset.
 
 Accessibility: toggle switches and chip groups use proper ARIA roles
 (`switch`, `radiogroup`/`radio`) with keyboard support, the calendar and
@@ -153,10 +159,7 @@ button has an `aria-label`. Not a full audit, e.g. no live-region
 announcements for state changes yet, but the core interactive controls
 are keyboard- and screen-reader-usable.
 
-Two known gaps:
-- The Time field on Add/Edit always accepts entry in 24-hour format
-  regardless of your 12h/24h display preference. That preference only
-  affects how times are *shown* elsewhere (cards, detail page, sharing).
+One known gap:
 - Location suggestions only draw on venues you've personally used before,
   scoped to the event type you've selected. Typing "Manchester" won't
   surface real venues you haven't been to yet; that would need a real

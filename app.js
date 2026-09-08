@@ -4,6 +4,7 @@
    ========================================================== */
 
 const STORAGE_KEY = 'going_events_v1';
+const APP_VERSION = '1.2';
 
 const TYPES = ['Concert','Festival','Sport','Gaming','Trip','Theatre','Other'];
 
@@ -146,6 +147,8 @@ const COMPACT_KEY = 'horizon_compact_v1';
 function loadCompact(){ return localStorage.getItem(COMPACT_KEY) === '1'; }
 function saveCompact(v){ localStorage.setItem(COMPACT_KEY, v ? '1' : '0'); }
 let compactMode = loadCompact();
+let homeSearchOpen = false;
+let homeSearchQuery = '';
 
 // Suggestions only draw on people from events within roughly the last six
 // months (or upcoming). Someone you haven't gone anywhere with in a while
@@ -547,58 +550,15 @@ function renderSettings(){
   wrap.appendChild(sectionTitle('About'));
   const aboutCard = document.createElement('div'); aboutCard.className='detail-card';
   aboutCard.innerHTML = `
-    <p style="font-size:13px;color:var(--text-muted);line-height:1.6;margin:0;">
+    <p style="font-size:13px;color:var(--text-muted);line-height:1.6;margin:0 0 12px;">
       Horizon is a simple place to keep track of the things you're going
       to: concerts, festivals, trips, and more. No accounts, no social
       features, just what you're going to, when, and what you need to
       bring. Everything stays on this device.
     </p>
+    <p style="font-size:12px;color:var(--text-faint);margin:0;">Version ${APP_VERSION}</p>
   `;
   wrap.appendChild(aboutCard);
-
-  // -- Changelog --
-  wrap.appendChild(sectionTitle('Changelog'));
-  const changelogCard = document.createElement('div'); changelogCard.className='detail-card';
-  const CHANGELOG = [
-    { label: 'Latest', bullets: [
-      'Accessibility pass: keyboard support, screen reader labels, focus handling',
-      'Duplicate an event from its detail page instead of re-entering it',
-      'Light/dark and accent color changes now cross-fade smoothly',
-    ]},
-    { label: 'Calendar & locations', bullets: [
-      'Custom calendar picker and location suggestions from your own history',
-      'Default event type, haptics toggle, and App Store icon variants ready',
-      'Settings reorganized: Time format and About/Changelog split out',
-    ]},
-    { label: 'Settings & theming', bullets: [
-      'Dedicated Settings page, light/dark theme, five accent colors',
-      'Time format, auto-archive, and compact view moved into real settings',
-      'Removed manual backup/export in favor of a future iCloud plan',
-    ]},
-    { label: 'Refinements', bullets: [
-      'Going with and Before you go rebuilt as add/remove suggestion lists',
-      'Fixed the service worker so updates land automatically',
-      'Removed swipe gestures in favor of simpler taps',
-    ]},
-    { label: 'V1 launch', bullets: [
-      'Home, Archive, Add/Edit, countdown states, multi-day events',
-      'Ticket status, travel notes, and preparation checklists',
-      'Share event, and installable as a home screen app',
-    ]},
-  ];
-  CHANGELOG.forEach((entry, idx)=>{
-    const block = document.createElement('div'); block.className='changelog-entry';
-    const label = document.createElement('div'); label.className='changelog-label'; label.textContent = entry.label;
-    block.appendChild(label);
-    const list = document.createElement('ul'); list.className='changelog-list';
-    entry.bullets.forEach(b=>{
-      const li = document.createElement('li'); li.textContent = b;
-      list.appendChild(li);
-    });
-    block.appendChild(list);
-    changelogCard.appendChild(block);
-  });
-  wrap.appendChild(changelogCard);
 
   // -- Danger zone --
   const activeCount = EVENTS.filter(e=>!e._trashed).length;
@@ -685,6 +645,7 @@ const ICONS = {
   rows: '<svg viewBox="0 0 24 24"><rect x="4" y="5" width="16" height="4.5" rx="1.3"/><rect x="4" y="14.5" width="16" height="4.5" rx="1.3"/></svg>',
   squares: '<svg viewBox="0 0 24 24"><rect x="4" y="4" width="7" height="7" rx="1.3"/><rect x="13" y="4" width="7" height="7" rx="1.3"/><rect x="4" y="13" width="7" height="7" rx="1.3"/><rect x="13" y="13" width="7" height="7" rx="1.3"/></svg>',
   sliders: '<svg viewBox="0 0 24 24"><line x1="4" y1="6" x2="20" y2="6" stroke-linecap="round"/><circle cx="9" cy="6" r="2.2"/><line x1="4" y1="12" x2="20" y2="12" stroke-linecap="round"/><circle cx="15" cy="12" r="2.2"/><line x1="4" y1="18" x2="20" y2="18" stroke-linecap="round"/><circle cx="11" cy="18" r="2.2"/></svg>',
+  search: '<svg viewBox="0 0 24 24"><circle cx="10.5" cy="10.5" r="6.5"/><path d="M20 20l-4.8-4.8" stroke-linecap="round"/></svg>',
 };
 function icon(name){ return ICONS[name] || ''; }
 
@@ -695,7 +656,7 @@ function renderHome(){
   const wrap = document.createElement('div');
   wrap.className = 'screen';
 
-  const upcoming = EVENTS.filter(e=>!e.completed && !e._trashed).sort((a,b)=>{
+  const allUpcoming = EVENTS.filter(e=>!e.completed && !e._trashed).sort((a,b)=>{
     if(a.startDate !== b.startDate) return a.startDate < b.startDate ? -1 : 1;
     const at = a.time||'99:99', bt = b.time||'99:99';
     return at < bt ? -1 : at>bt ? 1 : 0;
@@ -704,41 +665,88 @@ function renderHome(){
   const head = document.createElement('div');
   head.className = 'page-head';
   head.style.alignItems = 'center';
-  head.innerHTML = `
-    <div class="page-sub" style="font-size:15px;font-weight:600;color:var(--text);">${upcoming.length ? `${upcoming.length} event${upcoming.length===1?'':'s'} coming up` : 'Nothing on the horizon'}</div>
-  `;
-  const headBtns = document.createElement('div');
-  headBtns.style.cssText = 'display:flex;gap:8px;';
-  if(upcoming.length){
-    const toggle = document.createElement('button');
-    toggle.className = 'icon-btn';
-    toggle.setAttribute('aria-label', compactMode ? 'Switch to card view' : 'Switch to compact view');
-    toggle.innerHTML = compactMode ? icon('squares') : icon('rows');
-    toggle.onclick = ()=>{ compactMode = !compactMode; saveCompact(compactMode); render(); };
-    headBtns.appendChild(toggle);
-  }
-  const settingsBtn = document.createElement('button');
-  settingsBtn.className = 'icon-btn';
-  settingsBtn.setAttribute('aria-label', 'Settings');
-  settingsBtn.innerHTML = icon('sliders');
-  settingsBtn.onclick = ()=> navigate('/settings');
-  headBtns.appendChild(settingsBtn);
-  head.appendChild(headBtns);
   wrap.appendChild(head);
 
-  if(!upcoming.length){
-    wrap.appendChild(emptyState(
-      'Nothing planned yet.',
-      "Add something you're looking forward to.",
-      '+ Add event', ()=>navigate('/add')
-    ));
-    return wrap;
+  const listContainer = document.createElement('div');
+
+  function renderList(){
+    listContainer.innerHTML = '';
+    const query = homeSearchQuery.trim().toLowerCase();
+    const filtered = query
+      ? allUpcoming.filter(ev => ev.title.toLowerCase().includes(query) || (ev.location||'').toLowerCase().includes(query))
+      : allUpcoming;
+
+    if(!allUpcoming.length){
+      listContainer.appendChild(emptyState(
+        'Nothing planned yet.',
+        "Add something you're looking forward to.",
+        '+ Add event', ()=>navigate('/add')
+      ));
+      return;
+    }
+    if(query && !filtered.length){
+      listContainer.appendChild(emptyState(
+        `No matches for "${homeSearchQuery}"`,
+        'Try a different search.',
+        'Clear search', ()=>{ homeSearchQuery=''; searchInputRef.value=''; renderList(); searchInputRef.focus(); }
+      ));
+      return;
+    }
+    const list = document.createElement('div'); list.className = 'ticket-list';
+    filtered.forEach(ev => list.appendChild(compactMode ? ticketCompactRow(ev) : ticketCard(ev)));
+    listContainer.appendChild(list);
   }
 
-  const list = document.createElement('div');
-  list.className = 'ticket-list';
-  upcoming.forEach(ev => list.appendChild(compactMode ? ticketCompactRow(ev) : ticketCard(ev)));
-  wrap.appendChild(list);
+  let searchInputRef = null;
+
+  if(homeSearchOpen){
+    const searchRow = document.createElement('div');
+    searchRow.style.cssText = 'display:flex;align-items:center;gap:8px;width:100%;';
+    const input = document.createElement('input');
+    input.type = 'text'; input.className = 'input'; input.placeholder = 'Search events';
+    input.value = homeSearchQuery;
+    input.style.cssText = 'flex:1;';
+    input.oninput = ()=>{ homeSearchQuery = input.value; renderList(); };
+    searchInputRef = input;
+    const closeBtn = document.createElement('button');
+    closeBtn.className = 'icon-btn'; closeBtn.setAttribute('aria-label', 'Close search');
+    closeBtn.innerHTML = icon('x');
+    closeBtn.onclick = ()=>{ homeSearchOpen = false; homeSearchQuery = ''; render(); };
+    searchRow.appendChild(input); searchRow.appendChild(closeBtn);
+    head.appendChild(searchRow);
+    setTimeout(()=> input.focus(), 0);
+  } else {
+    head.innerHTML = `
+      <div class="page-sub" style="font-size:15px;font-weight:600;color:var(--text);">${allUpcoming.length ? `${allUpcoming.length} event${allUpcoming.length===1?'':'s'} coming up` : 'Nothing on the horizon'}</div>
+    `;
+    const headBtns = document.createElement('div');
+    headBtns.style.cssText = 'display:flex;gap:8px;';
+    if(allUpcoming.length){
+      const toggle = document.createElement('button');
+      toggle.className = 'icon-btn';
+      toggle.setAttribute('aria-label', compactMode ? 'Switch to card view' : 'Switch to compact view');
+      toggle.innerHTML = compactMode ? icon('squares') : icon('rows');
+      toggle.onclick = ()=>{ compactMode = !compactMode; saveCompact(compactMode); render(); };
+      headBtns.appendChild(toggle);
+
+      const searchBtn = document.createElement('button');
+      searchBtn.className = 'icon-btn';
+      searchBtn.setAttribute('aria-label', 'Search events');
+      searchBtn.innerHTML = icon('search');
+      searchBtn.onclick = ()=>{ homeSearchOpen = true; render(); };
+      headBtns.appendChild(searchBtn);
+    }
+    const settingsBtn = document.createElement('button');
+    settingsBtn.className = 'icon-btn';
+    settingsBtn.setAttribute('aria-label', 'Settings');
+    settingsBtn.innerHTML = icon('sliders');
+    settingsBtn.onclick = ()=> navigate('/settings');
+    headBtns.appendChild(settingsBtn);
+    head.appendChild(headBtns);
+  }
+
+  renderList();
+  wrap.appendChild(listContainer);
   return wrap;
 }
 
@@ -1027,21 +1035,15 @@ function renderForm(existing, liveDraft, liveMultiDay, livePresetsTouched, liveI
 
   // -- Time
   form.appendChild(field('Time', ()=>{
-    const i = document.createElement('input');
-    i.type='text'; i.inputMode='numeric'; i.className='input'; i.placeholder='19:30'; i.maxLength=5;
-    i.value = draft.time || '';
-    i.oninput = ()=>{
-      let v = i.value.replace(/[^\d]/g,'').slice(0,4);
-      if(v.length >= 3) v = v.slice(0,2) + ':' + v.slice(2);
-      i.value = v;
-      draft.time = v.length===5 ? v : '';
-    };
-    i.onblur = ()=>{
-      const m = i.value.match(/^([01]?\d|2[0-3]):([0-5]\d)$/);
-      if(i.value && !m){ i.value=''; draft.time=''; showToast('Enter time as HH:MM'); return; }
-      if(m){ i.value = m[1].padStart(2,'0') + ':' + m[2]; draft.time = i.value; }
-    };
-    return i;
+    const btn = document.createElement('button');
+    btn.type = 'button'; btn.className = 'input date-display';
+    btn.textContent = draft.time ? formatTimeDisplay(draft.time) : 'Add a time';
+    if(!draft.time) btn.style.color = 'var(--text-faint)';
+    btn.onclick = ()=> openTimePicker(draft.time, (val)=>{
+      draft.time = val;
+      renderInto();
+    });
+    return btn;
   }));
 
   // -- Location
@@ -1633,5 +1635,111 @@ function openDatePicker(initialDateStr, onSelect){
     sheet.appendChild(todayBtn);
   }
   paint();
+  restoreFocus = trapFocus(overlay, sheet);
+}
+
+/* ---------------- custom time picker (branded wheel, replaces native time input) ---------------- */
+function openTimePicker(initialTimeStr, onSelect){
+  const overlay = document.createElement('div'); overlay.className='overlay';
+  overlay.setAttribute('role', 'dialog');
+  overlay.setAttribute('aria-modal', 'true');
+  overlay.setAttribute('aria-label', 'Choose a time');
+  const sheet = document.createElement('div'); sheet.className='sheet time-picker-sheet';
+  overlay.appendChild(sheet);
+  document.body.appendChild(overlay);
+  requestAnimationFrame(()=> overlay.classList.add('is-open'));
+
+  let restoreFocus = ()=>{};
+  const close = ()=>{
+    overlay.classList.remove('is-open');
+    setTimeout(()=>overlay.remove(), 200);
+    restoreFocus();
+  };
+  overlay.addEventListener('click', (e)=>{ if(e.target===overlay) close(); });
+  overlay.addEventListener('keydown', (e)=>{ if(e.key==='Escape'){ e.preventDefault(); close(); } });
+
+  const ITEM_H = 44;
+  const VISIBLE = 5;
+  const PAD = Math.floor(VISIBLE/2) * ITEM_H;
+  const format = loadTimeFormat(); // '24h' | '12h'
+
+  // Resolve a starting point: the passed-in time, or the current hour if none set yet.
+  let h24, mm;
+  if(initialTimeStr){
+    [h24, mm] = initialTimeStr.split(':').map(Number);
+  } else {
+    const now = new Date();
+    h24 = now.getHours(); mm = 0;
+  }
+  let ampm = h24 >= 12 ? 'PM' : 'AM';
+  let hourDisplay = format==='24h' ? h24 : (h24 % 12 === 0 ? 12 : h24 % 12);
+
+  const display = document.createElement('div'); display.className='time-display';
+  const updateDisplay = ()=>{
+    display.textContent = format==='24h'
+      ? `${String(hourDisplay).padStart(2,'0')}:${String(mm).padStart(2,'0')}`
+      : `${hourDisplay}:${String(mm).padStart(2,'0')} ${ampm}`;
+  };
+  updateDisplay();
+  sheet.appendChild(display);
+
+  const row = document.createElement('div'); row.className='time-wheel-row';
+  const highlight = document.createElement('div'); highlight.className='time-wheel-highlight';
+
+  function buildWheel(values, formatFn, initialValue, onSettle){
+    const col = document.createElement('div'); col.className='time-wheel';
+    col.style.paddingTop = PAD+'px'; col.style.paddingBottom = PAD+'px';
+    values.forEach(v=>{
+      const item = document.createElement('div'); item.className='time-wheel-item';
+      item.textContent = formatFn(v);
+      col.appendChild(item);
+    });
+    const initialIndex = values.indexOf(initialValue);
+    requestAnimationFrame(()=>{ col.scrollTop = Math.max(0, initialIndex) * ITEM_H; });
+
+    let debounceTimer, lastIdx = initialIndex;
+    col.addEventListener('scroll', ()=>{
+      clearTimeout(debounceTimer);
+      debounceTimer = setTimeout(()=>{
+        const idx = Math.max(0, Math.min(values.length-1, Math.round(col.scrollTop / ITEM_H)));
+        if(idx !== lastIdx){ lastIdx = idx; haptic(6); }
+        onSettle(values[idx]);
+        updateDisplay();
+      }, 120);
+    }, { passive: true });
+    return col;
+  }
+
+  const hourValues = format==='24h' ? Array.from({length:24}, (_,i)=>i) : Array.from({length:12}, (_,i)=>i+1);
+  const hourCol = buildWheel(hourValues, v=>String(v).padStart(format==='24h'?2:1,'0'), hourDisplay, v=>{ hourDisplay = v; });
+  row.appendChild(hourCol);
+
+  const minuteValues = Array.from({length:60}, (_,i)=>i);
+  const minuteCol = buildWheel(minuteValues, v=>String(v).padStart(2,'0'), mm, v=>{ mm = v; });
+  row.appendChild(minuteCol);
+
+  if(format === '12h'){
+    const ampmCol = buildWheel(['AM','PM'], v=>v, ampm, v=>{ ampm = v; });
+    row.appendChild(ampmCol);
+  }
+
+  sheet.appendChild(row);
+  row.appendChild(highlight);
+
+  const actions = document.createElement('div'); actions.className='sheet-actions'; actions.style.marginTop = '18px';
+  const clearBtn = document.createElement('button'); clearBtn.className='btn btn-ghost';
+  clearBtn.textContent = 'No time';
+  clearBtn.onclick = ()=>{ haptic(10); onSelect(''); close(); };
+  const doneBtn = document.createElement('button'); doneBtn.className='btn btn-primary';
+  doneBtn.textContent = 'Done';
+  doneBtn.onclick = ()=>{
+    haptic(10);
+    const finalHour24 = format==='24h' ? hourDisplay : (ampm==='AM' ? (hourDisplay%12) : (hourDisplay%12)+12);
+    onSelect(`${String(finalHour24).padStart(2,'0')}:${String(mm).padStart(2,'0')}`);
+    close();
+  };
+  actions.appendChild(clearBtn); actions.appendChild(doneBtn);
+  sheet.appendChild(actions);
+
   restoreFocus = trapFocus(overlay, sheet);
 }

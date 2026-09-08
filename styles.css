@@ -393,7 +393,7 @@ input, select, textarea{ font-family: inherit; }
   display:inline-flex; align-items:center; gap:9px;
   background: var(--surface); border:1.5px solid var(--border);
   color: var(--text-muted); flex-shrink:0;
-  padding: 10px 16px 10px 12px; border-radius: 999px; font-size: 13.5px; font-weight:600;
+  padding: 10px 16px 10px 12px; border-radius: var(--radius-sm); font-size: 13.5px; font-weight:600;
   cursor:pointer; transition: all .16s ease;
 }
 .multiday-toggle .md-box{
@@ -501,12 +501,6 @@ input, select, textarea{ font-family: inherit; }
   padding: 12px 14px; margin-bottom: 10px;
 }
 .section-label{ font-size:11px; color: var(--text-faint); font-weight:700; letter-spacing:.03em; text-transform:uppercase; margin-bottom:8px; }
-.changelog-entry{ padding-bottom:14px; margin-bottom:14px; border-bottom:1px solid var(--border); }
-.changelog-entry:last-child{ padding-bottom:0; margin-bottom:0; border-bottom:none; }
-.changelog-label{ font-family: var(--font-display); font-size:15px; letter-spacing:.01em; color: var(--text); margin-bottom:6px; }
-.changelog-list{ margin:0; padding-left:18px; font-size:12.5px; color: var(--text-muted); line-height:1.6; }
-.changelog-list li{ margin-bottom:2px; }
-.changelog-list li:last-child{ margin-bottom:0; }
 .swatch-check{ display:flex; }
 .swatch-check svg{ width:14px; height:14px; stroke:#0B0C10; fill:none; stroke-width:3; stroke-linecap:round; stroke-linejoin:round; }
 
@@ -601,6 +595,31 @@ input, select, textarea{ font-family: inherit; }
 .cal-day.is-selected{ background: var(--accent); color: var(--bg); }
 .cal-day.is-selected.is-today{ color: var(--bg); }
 .cal-day-empty{ pointer-events:none; }
+
+/* ============================================================
+   Custom time picker (branded wheel, replaces native time input)
+   ============================================================ */
+.time-picker-sheet{ padding-bottom: calc(26px + var(--safe-bottom)); }
+.time-display{
+  font-family: var(--font-display); font-size:38px; letter-spacing:.02em;
+  text-align:center; color: var(--text); margin-bottom: 8px;
+}
+.time-wheel-row{ position:relative; display:flex; gap:4px; }
+.time-wheel{
+  flex:1; height:220px; overflow-y:scroll; scroll-snap-type:y mandatory;
+  -webkit-overflow-scrolling:touch; scrollbar-width:none; scroll-behavior:auto;
+}
+.time-wheel::-webkit-scrollbar{ display:none; }
+.time-wheel-item{
+  height:44px; display:flex; align-items:center; justify-content:center;
+  scroll-snap-align:center; font-family: var(--font-display); font-size:22px;
+  color: var(--text-muted); letter-spacing:.02em;
+}
+.time-wheel-highlight{
+  position:absolute; left:0; right:0; top:88px; height:44px;
+  background: var(--accent-soft); border-top:1px solid var(--accent-border); border-bottom:1px solid var(--accent-border);
+  border-radius:10px; pointer-events:none;
+}
 
 @media (min-width: 860px){
   .overlay{ align-items:center; }
