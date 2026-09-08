@@ -1,5 +1,5 @@
 /* ============================================================
-   GOING — design tokens
+   HORIZON: design tokens
    A personal event companion, styled around the admission
    ticket: perforated stubs, torn dashed lines, stamped type.
    ============================================================ */
@@ -41,7 +41,7 @@
   --safe-bottom: env(safe-area-inset-bottom, 0px);
 }
 
-/* Light theme — applied via [data-theme="light"] on <html>, set in app.js.
+/* Light theme, applied via [data-theme="light"] on <html>, set in app.js.
    Accent/success/danger/urgency colors stay the same across both themes;
    only the neutral surface, border and text tokens flip. */
 [data-theme="light"]{
@@ -61,6 +61,16 @@
 }
 
 *{ box-sizing: border-box; }
+
+/* Smooths out light/dark and accent-color switches: since those are just
+   CSS custom-property changes on the root, any element whose own color
+   properties reference var(--accent), var(--bg), etc. will cross-fade
+   instead of jumping instantly. More specific component rules further
+   down (e.g. .chip's own transition) simply override this for their own
+   elements, so existing hover/press feel is unaffected. */
+*{
+  transition: background-color .25s ease, border-color .25s ease, color .25s ease, box-shadow .25s ease;
+}
 html,body{ height:100%; }
 body{
   margin:0;
@@ -340,6 +350,11 @@ input, select, textarea{ font-family: inherit; }
   transition: border-color .15s ease;
 }
 .input:focus, .textarea:focus{ outline:none; border-color: var(--accent); }
+.switch:focus-visible, .chip:focus-visible, .cal-day:focus-visible, .cal-nav:focus-visible,
+.icon-btn:focus-visible, .nav-btn:focus-visible, .btn:focus-visible, .name-tag:focus-visible,
+.suggest-chip:focus-visible, .tag-toggle:focus-visible, .tag-removable:focus-visible{
+  outline: 2px solid var(--accent); outline-offset: 2px;
+}
 .input::placeholder, .textarea::placeholder{ color: var(--text-faint); }
 .row-2{ display:flex; gap:12px; min-width:0; }
 .row-2 > *{ flex:1; min-width:0; }
@@ -377,9 +392,9 @@ input, select, textarea{ font-family: inherit; }
 .multiday-toggle{
   display:inline-flex; align-items:center; gap:9px;
   background: var(--surface); border:1.5px solid var(--border);
-  color: var(--text-muted);
+  color: var(--text-muted); flex-shrink:0;
   padding: 10px 16px 10px 12px; border-radius: 999px; font-size: 13.5px; font-weight:600;
-  cursor:pointer; margin-top: 12px; transition: all .16s ease;
+  cursor:pointer; transition: all .16s ease;
 }
 .multiday-toggle .md-box{
   width:19px; height:19px; border-radius:6px; border:1.8px solid var(--border-strong);
@@ -447,6 +462,9 @@ input, select, textarea{ font-family: inherit; }
 
 .add-item-row{ display:flex; gap:8px; margin-top:10px; }
 .add-item-row .input{ padding: 10px 12px; font-size:14px; }
+.date-row{ display:flex; gap:10px; align-items:stretch; }
+.date-row .input{ flex:1; min-width:0; }
+.date-row-end{ margin-top:10px; }
 
 /* ============================================================
    Detail page
@@ -483,6 +501,12 @@ input, select, textarea{ font-family: inherit; }
   padding: 12px 14px; margin-bottom: 10px;
 }
 .section-label{ font-size:11px; color: var(--text-faint); font-weight:700; letter-spacing:.03em; text-transform:uppercase; margin-bottom:8px; }
+.changelog-entry{ padding-bottom:14px; margin-bottom:14px; border-bottom:1px solid var(--border); }
+.changelog-entry:last-child{ padding-bottom:0; margin-bottom:0; border-bottom:none; }
+.changelog-label{ font-family: var(--font-display); font-size:15px; letter-spacing:.01em; color: var(--text); margin-bottom:6px; }
+.changelog-list{ margin:0; padding-left:18px; font-size:12.5px; color: var(--text-muted); line-height:1.6; }
+.changelog-list li{ margin-bottom:2px; }
+.changelog-list li:last-child{ margin-bottom:0; }
 .swatch-check{ display:flex; }
 .swatch-check svg{ width:14px; height:14px; stroke:#0B0C10; fill:none; stroke-width:3; stroke-linecap:round; stroke-linejoin:round; }
 
@@ -495,23 +519,11 @@ input, select, textarea{ font-family: inherit; }
 .tag{ background: var(--surface-2); border:1px solid var(--border); padding:5px 11px; border-radius:999px; font-size:12.5px; }
 .tag-toggle{ cursor:pointer; user-select:none; transition: all .14s ease; }
 .tag-toggle.is-not-coming{ background:transparent; border-style:dashed; color: var(--text-faint); text-decoration: line-through; }
-
-.chip-check-row{ display:flex; flex-wrap:wrap; gap:7px; }
-.chip-check{
-  display:flex; align-items:center; gap:6px;
-  background: var(--surface-2); border:1px solid var(--border); color: var(--text);
-  padding: 7px 12px 7px 9px; border-radius:999px; font-size:12.5px; font-weight:600;
-  cursor:pointer; transition: all .14s ease;
+.tag-removable{
+  display:inline-flex; align-items:center; gap:6px; cursor:pointer; user-select:none;
+  transition: all .14s ease;
 }
-.chip-check .cc-box{
-  width:15px; height:15px; border-radius:5px; border:1.6px solid var(--border-strong);
-  display:flex; align-items:center; justify-content:center; flex-shrink:0; transition: all .14s ease;
-}
-.chip-check .cc-box svg{ width:9px; height:9px; stroke:#fff; stroke-width:3.4; fill:none; opacity:0; transform:scale(.5); transition: all .1s ease; }
-.chip-check.is-done{ background: var(--success-soft); border-color: transparent; color: var(--success); }
-.chip-check.is-done .cc-box{ background: var(--success); border-color: var(--success); }
-.chip-check.is-done .cc-box svg{ opacity:1; transform:scale(1); }
-.chip-check.is-done span{ text-decoration: line-through; }
+.tag-removable:active{ background: rgba(255,92,92,0.12); border-color: rgba(255,92,92,0.3); color: var(--danger); }
 
 .share-row{ display:flex; gap:8px; }
 .share-icon-btn{
@@ -559,6 +571,36 @@ input, select, textarea{ font-family: inherit; }
 .sheet-body{ color: var(--text-muted); font-size:14px; margin-bottom:22px; line-height:1.5; }
 .sheet-actions{ display:flex; gap:10px; }
 .sheet-actions .btn{ flex:1; }
+
+/* ============================================================
+   Custom calendar (Date field picker)
+   ============================================================ */
+.date-display{
+  appearance:none; -webkit-appearance:none; text-align:left; cursor:pointer;
+}
+.date-picker-sheet{ padding-bottom: calc(26px + var(--safe-bottom)); }
+.cal-header{ display:flex; align-items:center; justify-content:space-between; margin-bottom:18px; }
+.cal-title{ font-family: var(--font-display); font-size:20px; letter-spacing:.01em; }
+.cal-nav{
+  width:34px; height:34px; border-radius:50%; flex-shrink:0;
+  background: var(--surface-2); border:1px solid var(--border);
+  display:flex; align-items:center; justify-content:center; cursor:pointer; color: var(--text);
+}
+.cal-nav svg{ width:16px; height:16px; stroke:currentColor; fill:none; stroke-width:2.2; }
+.cal-nav:active{ transform: scale(.92); }
+.cal-weekdays{ display:grid; grid-template-columns: repeat(7, 1fr); margin-bottom:4px; }
+.cal-weekday{ text-align:center; font-size:11px; font-weight:700; color: var(--text-faint); letter-spacing:.02em; padding: 4px 0; }
+.cal-grid{ display:grid; grid-template-columns: repeat(7, 1fr); gap:2px; }
+.cal-day{
+  aspect-ratio:1; display:flex; align-items:center; justify-content:center;
+  border:none; background:none; color: var(--text); font-size:14px; font-weight:600;
+  border-radius:50%; cursor:pointer; transition: all .12s ease;
+}
+.cal-day:active{ background: var(--surface-2); }
+.cal-day.is-today{ color: var(--accent); font-weight:800; }
+.cal-day.is-selected{ background: var(--accent); color: var(--bg); }
+.cal-day.is-selected.is-today{ color: var(--bg); }
+.cal-day-empty{ pointer-events:none; }
 
 @media (min-width: 860px){
   .overlay{ align-items:center; }

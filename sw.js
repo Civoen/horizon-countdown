@@ -6,7 +6,7 @@ const STATIC_ASSETS = [
   './icons/apple-touch-icon.png',
 ];
 
-// Fetch a request and return a Response guaranteed to be un-redirected —
+// Fetch a request and return a Response guaranteed to be un-redirected:
 // Safari refuses to let a service worker serve a response whose
 // `.redirected` flag is true (e.g. a host 30x-ing "/" to "/index.html").
 async function fetchClean(request) {
@@ -27,7 +27,7 @@ self.addEventListener('install', (e) => {
         try {
           const res = await fetchClean(url);
           await cache.put(url, res);
-        } catch (err) { /* asset unreachable, skip — fetch handler will retry live */ }
+        } catch (err) { /* asset unreachable, skip; fetch handler will retry live */ }
       }));
     }).then(() => self.skipWaiting())
   );
@@ -51,7 +51,7 @@ self.addEventListener('fetch', (e) => {
   if (e.request.method !== 'GET') return;
 
   // App shell (index.html, app.js, styles.css, manifest.json): always go to
-  // the network first so a redeploy is visible on the very next load — no
+  // the network first so a redeploy is visible on the very next load, no
   // dependency on this file's own cache-version string ever being bumped.
   // Falls back to the last cached copy only when there's no connection.
   if (isShellRequest(e.request)) {

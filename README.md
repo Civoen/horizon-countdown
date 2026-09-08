@@ -1,17 +1,17 @@
-# Horizon — a simple place to keep track of what you're going to
+# Horizon: a simple place to keep track of what you're going to
 
 A mobile-first PWA built from the product brief: concerts, festivals, sport,
-gaming, trips and theatre — what you're going to, when, where, with who, and
+gaming, trips and theatre, what you're going to, when, where, with who, and
 what you need to sort out beforehand.
 
-It's plain HTML/CSS/JS — no build step, no framework, no backend. All event
+It's plain HTML/CSS/JS, no build step, no framework, no backend. All event
 data is stored in the browser's `localStorage`, on-device only.
 
 ## Your data and redeploying
 
 All events live in this browser's `localStorage`, tied to the exact URL
 (origin) the app is served from. A code update to the **same URL** never
-touches that data — but if you redeploy to a **different URL** (a fresh
+touches that data, but if you redeploy to a **different URL** (a fresh
 Netlify Drop gives you a new random subdomain every time; on Cloudflare
 Pages, every deployment gets its own unique `*.pages.dev` alias in
 addition to your stable production URL), that's a different origin as
@@ -21,13 +21,13 @@ preview link.
 
 **Specific to adding this to your iPhone home screen:** Apple documents
 that a home-screen web app's storage is genuinely separate from Safari's
-own tab storage for the same site — and separately, iOS can clear a
+own tab storage for the same site, and separately, iOS can clear a
 site's `localStorage` on its own under storage pressure or after a period
 of disuse, regardless of what the app's code does. Neither of these is
 something a website can fully opt out of. Two things mitigate it:
 
-- The app now checks for and installs code updates automatically —
-  every time you open it, or bring it back to the foreground — and
+- The app now checks for and installs code updates automatically,
+  every time you open it, or bring it back to the foreground, and
   reloads itself once a new version is ready (unless you're mid-way
   through adding or editing an event, in which case it waits until
   you're done). You should never need to remove and re-add the home
@@ -37,7 +37,7 @@ something a website can fully opt out of. Two things mitigate it:
   (`navigator.storage.persist()`), which lowers the odds of an automatic
   clear. It's a request, not a guarantee.
 
-There's no in-app backup/export feature at the moment — the plan is to
+There's no in-app backup/export feature at the moment. The plan is to
 rely on standard iCloud device backup once this ships as a native app
 (see "Path to the App Store" below), rather than maintain a parallel
 manual-backup flow in the web version.
@@ -49,7 +49,7 @@ index.html      the app shell
 styles.css      design system (ticket-stub visual language)
 app.js          all state, routing and rendering logic
 manifest.json   PWA manifest (name, icons, colors, standalone display)
-sw.js           service worker — caches the app shell for offline use
+sw.js           service worker, caches the app shell for offline use
 icons/          app icons (192, 512, apple-touch-icon)
 ```
 
@@ -57,18 +57,18 @@ icons/          app icons (192, 512, apple-touch-icon)
 
 Because it's static files, any static host works. Two easy options:
 
-**Netlify Drop** — go to https://app.netlify.com/drop and drag the whole
+**Netlify Drop**, go to https://app.netlify.com/drop and drag the whole
 `going` folder in. You'll get a live HTTPS URL immediately (required for a
-PWA — Safari won't install non-HTTPS sites to the home screen, `localhost`
+PWA; Safari won't install non-HTTPS sites to the home screen, `localhost`
 during testing is the one exception).
 
-**GitHub Pages** — push the folder to a repo, then enable Pages on the
+**GitHub Pages**, push the folder to a repo, then enable Pages on the
 `main` branch in the repo's Settings → Pages. Your URL will be
 `https://yourname.github.io/reponame/`.
 
 Once it's live:
 
-1. Open the URL in **Safari** on your iPhone (must be Safari, not Chrome —
+1. Open the URL in **Safari** on your iPhone (must be Safari, not Chrome;
    only Safari can add PWAs to the iOS home screen).
 2. Tap the **Share** icon → **Add to Home Screen**.
 3. It'll launch full-screen with its own icon, no browser chrome.
@@ -78,13 +78,13 @@ Once it's live:
 The brief asks for 7-day / 1-day / event-day reminders. iOS PWAs can't
 reliably schedule local notifications in the background without a server
 sending push messages (Apple requires real Web Push with a backend for
-anything beyond the app being open) — so V1 stores your reminder
+anything beyond the app being open), so V1 stores your reminder
 preferences but doesn't fire background pushes yet. Wrapping the app
 natively (below) is the more reliable path to real push notifications.
 
 ## Path to the App Store
 
-This is a good candidate for **Capacitor** (by the Ionic team) — it wraps
+This is a good candidate for **Capacitor** (by the Ionic team); it wraps
 an existing web app in a real native shell with no rewrite:
 
 ```
@@ -96,31 +96,71 @@ npx cap open ios
 ```
 
 That opens the project in Xcode, where you can add real APNs push
-notifications, submit to TestFlight, and eventually the App Store — reusing
+notifications, submit to TestFlight, and eventually the App Store, reusing
 all of this HTML/CSS/JS as-is. `PWABuilder` (pwabuilder.com) is a
 lighter-weight alternative if you just want a store-ready wrapper without
 touching Xcode much.
 
+### App icon variants, tied to accent color
+
+`icons/alternate-icons/` has a matching app icon pre-rendered for each of
+the five accent colors (`icon-{violet,sky,teal,pink,amber}-1024.png` and
+`-180.png`), so this doesn't need redoing later. Once native, iOS's
+Alternate App Icons API lets an app switch its own home screen icon at
+runtime:
+
+```swift
+UIApplication.shared.setAlternateIconName("Icon-Teal")
+```
+
+Add each variant to the Xcode asset catalog, list them in `Info.plist`
+under `CFBundleIcons` / `CFBundleAlternateIcons`, and call
+`setAlternateIconName` from Capacitor (via a small native bridge plugin,
+or `@capacitor-community/app-icon`) whenever the accent color changes in
+Settings, keyed by the same `id` already used in `ACCENT_THEMES` in
+`app.js`. The web version can't do this itself; iOS only exposes this API
+to installed native apps.
+
 ## What's implemented (V1)
 
 Home, Archive, Add/Edit event, event detail, multi-day events, live
-countdown states (DAYS / TOMORROW / TODAY / TONIGHT / HAPPENING NOW),
-going-with names with suggestions from people you've gone somewhere with
-in roughly the last six months, ticket-purchased toggle, a single travel
-note, a before-you-go checklist with type-based starter presets,
+countdown states (DAYS / TOMORROW / TODAY / TONIGHT / HAPPENING NOW), a
+custom-built calendar for picking dates (the native iOS date picker can't
+be restyled at all, so this replaces it entirely rather than trying to
+reskin it), going-with names with suggestions from people you've gone
+somewhere with in roughly the last six months, location suggestions from
+your own past events of the same type within that same window (not a
+real-world venue lookup, see below), ticket-purchased toggle, a single
+travel note, a before-you-go checklist with type-based starter presets,
 mark-as-completed, automatic archiving the day after an event ends
 (re-checked on every navigation, so a past-dated event you just added
 lands straight in Archive), delete with confirmation and a five-second
 undo, share event / share preparation (native share sheet on iOS,
-clipboard fallback elsewhere), and empty states.
+clipboard fallback elsewhere), duplicating an event (same details, fresh
+date to fill in, from the detail page's action row), and empty states.
 
 A dedicated **Settings** page (the sliders icon on Home) holds: Home
-view (Full/Compact), a light/dark theme switch, five accent colors,
-new-event defaults (12h/24h time display, auto-archive on by default),
-and a "clear all events" reset.
+view (Full/Compact), a light/dark theme switch that cross-fades instead
+of jumping, five accent colors, time format (12h/24h), new-event defaults
+(default type, auto-archive on by default), a haptics on/off switch
+(inert on iOS Safari today, see below), About, a changelog, and a
+"clear all events" reset.
 
-One known gap: the Time field on Add/Edit always accepts entry in 24-hour
-format regardless of your 12h/24h display preference — that preference
-only affects how times are *shown* elsewhere (cards, detail page,
-sharing). Worth fixing if 12-hour entry turns out to matter in practice.
+Accessibility: toggle switches and chip groups use proper ARIA roles
+(`switch`, `radiogroup`/`radio`) with keyboard support, the calendar and
+confirmation sheets trap focus and close on Escape, and every icon-only
+button has an `aria-label`. Not a full audit, e.g. no live-region
+announcements for state changes yet, but the core interactive controls
+are keyboard- and screen-reader-usable.
+
+Two known gaps:
+- The Time field on Add/Edit always accepts entry in 24-hour format
+  regardless of your 12h/24h display preference. That preference only
+  affects how times are *shown* elsewhere (cards, detail page, sharing).
+- Location suggestions only draw on venues you've personally used before,
+  scoped to the event type you've selected. Typing "Manchester" won't
+  surface real venues you haven't been to yet; that would need a real
+  places/maps API, which the original brief explicitly ruled out to keep
+  the app simple, private, and working offline. Worth revisiting if
+  that trade-off ever stops being the right one.
 

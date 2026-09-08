@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, maximum-scale=1">
-<title>Horizon — event tracker</title>
+<title>Horizon: event tracker</title>
 <meta name="description" content="A simple place to keep track of the things you're going to.">
 
 <!-- PWA -->
@@ -50,7 +50,7 @@ if ('serviceWorker' in navigator) {
   window.addEventListener('load', () => {
     navigator.serviceWorker.register('sw.js').then((reg) => {
       // Check for a new version every time the app is opened or brought
-      // back to the foreground — a home-screen app can otherwise sit on
+      // back to the foreground, since a home-screen app can otherwise sit on
       // an old service worker for weeks without ever re-checking.
       reg.update();
       document.addEventListener('visibilitychange', () => {
@@ -60,7 +60,7 @@ if ('serviceWorker' in navigator) {
 
     // Once a new service worker takes control, the new app.js/styles.css
     // are live but this tab is still running the old ones in memory.
-    // Reload once to pick them up — unless the person is mid-way through
+    // Reload once to pick them up, unless the person is mid-way through
     // adding or editing an event, in which case wait until they navigate
     // away so an in-progress draft is never lost to a surprise refresh.
     let reloading = false;
